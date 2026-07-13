@@ -15,9 +15,10 @@ export async function PUT(request: NextRequest) {
   const rq = await requireRole(["admin", "gm"]);
   if (!rq.ok) return rq.response;
 
-  const b = (await request.json().catch(() => ({}))) as { quotationEnabled?: boolean };
+  const b = (await request.json().catch(() => ({}))) as { quotationEnabled?: boolean; chatSendEnabled?: boolean };
   const next = await setFeatureFlags({
     ...(typeof b.quotationEnabled === "boolean" ? { quotationEnabled: b.quotationEnabled } : {}),
+    ...(typeof b.chatSendEnabled === "boolean" ? { chatSendEnabled: b.chatSendEnabled } : {}),
   });
   return NextResponse.json({ ok: true, ...next });
 }

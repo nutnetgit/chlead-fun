@@ -127,8 +127,15 @@ export async function getConversionRateConfig(): Promise<ConversionRateConfig> {
 // features that should be hideable from staff until the back-office side is
 // ready (first user: quotations — the "สร้างใบเสนอราคา" button in /chat only
 // renders while this is on).
-export type FeatureFlags = { quotationEnabled: boolean };
-const FEATURE_DEFAULTS: FeatureFlags = { quotationEnabled: false };
+// chatSendEnabled (user req 2026-07-14): a global kill-switch for typing/
+// sending free-text replies through /chat, across every brand — each staff
+// text reply is a LINE push and eats the OA's monthly quota (Mitsubishi hit
+// 67% of its cap in a single month from chat alone). When off, staff are
+// pointed at LINE OA Manager (unlimited, but outside this app) for open-
+// ended conversation; sending a quotation PDF is a separate, deliberate,
+// high-value send and stays available regardless of this switch.
+export type FeatureFlags = { quotationEnabled: boolean; chatSendEnabled: boolean };
+const FEATURE_DEFAULTS: FeatureFlags = { quotationEnabled: false, chatSendEnabled: true };
 
 export async function getFeatureFlags(): Promise<FeatureFlags> {
   const saved = await getSetting<Partial<FeatureFlags>>("features");

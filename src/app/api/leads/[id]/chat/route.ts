@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { linePush } from "@/lib/flex";
 import { requireRole } from "@/lib/authz";
 import { getLineCredsForBrand } from "@/lib/lineConfig";
+import { getFeatureFlags } from "@/lib/settings";
 
 type Ctx = { params: Promise<{ id: string }> };
 
@@ -38,6 +39,14 @@ export async function GET(_request: NextRequest, { params }: Ctx) {
 export async function POST(request: NextRequest, { params }: Ctx) {
   const rq = await requireRole(["sales", "manager", "gm", "admin"]);
   if (!rq.ok) return rq.response;
+
+  // Global kill-switch (user req 2026-07-14, /settings/line-oa) — free-text
+  // chat replies burn LINE push quota; quotation sending is a separate flow
+  // and stays available even while this is off.
+  const flags = await getFeatureFlags();
+  if (!flags.chatSendEnabled) {
+    return NextResponse.json({ error: "ปิดการส่งแชทชั่วคราว (ประหยัดโควต้า LINE) — ตอบลูกค้าทาง LINE OA Manager แทน" }, { status: 403 });
+  }
 
   const { id } = await params;
   const leadId = BigInt(id || "0");

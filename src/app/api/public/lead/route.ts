@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { linePush, linePushFlex, buildOwnerConsentBubble } from "@/lib/flex";
-import { isLineWelcomeActive, getOwnerSwitchConfig } from "@/lib/settings";
+import { linePushFlex, buildOwnerConsentBubble } from "@/lib/flex";
+import { getOwnerSwitchConfig } from "@/lib/settings";
 import { getLineCredsForBrand } from "@/lib/lineConfig";
+import { welcomeSig, deliverWelcomeByPush } from "@/lib/welcome";
 
 /**
  * Customer self-intake from a salesperson's QR (user req 2026-07-07, reworked
@@ -60,6 +61,13 @@ export async function POST(request: NextRequest) {
     within_1m: "hot", m1_3: "warm", m3_6: "cold", over_6m: "cold",
   };
   const autoTemperature = buyTimeframe ? TIMEFRAME_TEMP[buyTimeframe] : undefined;
+  // Reply-token quota play (user req 2026-07-14): when the LIFF page runs
+  // inside the LINE app it sends `welcomeVia: "reply"` — it will follow up
+  // with liff.sendMessages() (a customer-side message), and the webhook
+  // answers that with the greeting via the FREE Reply API. In that mode we
+  // skip the paid push here entirely; the response carries a signed fallback
+  // token so the page can still request a push if sendMessages fails.
+  const wantsReply = b.welcomeVia === "reply";
 
   if (!name || !phone || phone.length < 9) return NextResponse.json({ error: "กรุณากรอกชื่อและเบอร์โทรให้ถูกต้อง" }, { status: 400 });
   if (!Number.isInteger(ownerUserId) || !Number.isInteger(brandId) || !Number.isInteger(branchId)) {
@@ -76,13 +84,6 @@ export async function POST(request: NextRequest) {
   if (!owner || !brand || !branch || (eventId && !event)) {
     return NextResponse.json({ error: "ลิงก์ไม่ถูกต้องหรือหมดอายุ" }, { status: 400 });
   }
-  // Re-bound as definitely-non-null: `brand`/`branch` are read inside
-  // sendWelcomePush, a nested closure declared further down — TS won't
-  // carry the guard's narrowing through a closure over a `const` from
-  // array destructuring.
-  const brandRow = brand;
-  const branchRow = branch;
-
   const channelName = eventId ? "Event / บูธ" : "Walk-in โชว์รูม";
   const channel =
     (await prisma.sourceChannel.findFirst({ where: { channelName } })) ??
@@ -130,39 +131,27 @@ export async function POST(request: NextRequest) {
   const salesPhone = owner.phone ?? null;
   const showroomLabel = `${brand.brandName} ${branch.branchName}`.trim();
 
-  // Welcome push (quota-gated — user req 2026-07-08, see src/lib/settings.ts
-  // isLineWelcomeActive). Fires in the same request as lead creation now that
-  // linking happens up front, rather than a separate follow-up call.
-  // Template per user req 2026-07-12 — brand name leads the greeting line,
-  // branch name (not brand+branch combined) on the showroom line.
+  // Welcome greeting (quota-gated — see src/lib/welcome.ts, the single
+  // template/delivery module shared with the webhook's free reply path and
+  // the push-fallback endpoint). In reply mode this short-circuits: the LIFF
+  // page follows up with a customer-side marker message and the webhook
+  // answers it via the FREE Reply API instead (user req 2026-07-14); the
+  // response carries expectReply + a signed fallback token so a failed
+  // sendMessages can still request the paid push.
   async function sendWelcomePush(leadId: bigint): Promise<boolean> {
-    if (!lineUserId) return false;
-    const creds = await getLineCredsForBrand(brandId);
-    const gate = await isLineWelcomeActive();
-    if (!creds.accessToken || !gate.active) return false;
-    const messages: Record<string, unknown>[] = [];
-    const phoneLine = salesPhone ? `\nเบอร์ติดต่อ ${salesPhone}` : "";
-    const greetingText = `${brandRow.brandName} ช.เอราวัณ ยินดีให้บริการ\nที่ปรึกษาการขายของท่านคือ\nคุณ ${salesName} จาก โชว์รูม ${branchRow.branchName}${phoneLine}`;
-    messages.push({ type: "text", text: greetingText });
-    if (event?.linePromoMessage) messages.push({ type: "text", text: event.linePromoMessage });
-    const push = await linePush(creds.accessToken, lineUserId, messages);
-    if (!push.ok) {
-      console.error(`[welcome push] brand=${brandId} lead=${leadId} status=${push.status} detail=${push.detail ?? ""}`);
-      return false;
-    }
-    // Log to our own chat history (user req 2026-07-13) — otherwise a
-    // brand-new lead with only a greeting and no reply yet never appears in
-    // /chat at all (its list only shows leads with >=1 fun_chat_message row).
-    await prisma.chatMessage.create({
-      data: { leadId, direction: "outbound", lineUserId, body: greetingText },
-    }).catch((e) => console.error("[welcome push] chat log failed:", e));
-    if (event?.linePromoMessage) {
-      await prisma.chatMessage.create({
-        data: { leadId, direction: "outbound", lineUserId, body: event.linePromoMessage },
-      }).catch((e) => console.error("[welcome push] promo chat log failed:", e));
-    }
-    return true;
+    if (wantsReply || !lineUserId) return false;
+    return deliverWelcomeByPush(leadId);
   }
+
+  // Reply-mode metadata appended to every success response: tells the LIFF
+  // page to fire liff.sendMessages (marker → webhook → free reply greeting),
+  // and gives it the HMAC it needs to request a paid push fallback if that
+  // send fails. Never set when a consent bubble is pending — that flow pushes
+  // its own Flex and the greeting must not race it.
+  const replyMeta = (leadId: bigint, ownerSwitchPending = false) =>
+    wantsReply && lineUserId && !ownerSwitchPending
+      ? { expectReply: true, welcomeSig: welcomeSig(leadId) }
+      : {};
 
   const now = new Date();
   const existing = await prisma.lead.findFirst({
@@ -204,7 +193,7 @@ export async function POST(request: NextRequest) {
           }),
         ]);
         const pushed = await sendWelcomePush(existing.leadId);
-        return NextResponse.json({ ok: true, reopen: true, leadId: String(existing.leadId), pushed, salesName, salesPhone, showroomLabel });
+        return NextResponse.json({ ok: true, reopen: true, leadId: String(existing.leadId), pushed, salesName, salesPhone, showroomLabel, ...replyMeta(existing.leadId) });
       }
 
       if (!ownerSwitchCfg.enabled) {
@@ -212,7 +201,7 @@ export async function POST(request: NextRequest) {
         // just the normal welcome push, same as any repeat scan.
         const pushed = await sendWelcomePush(existing.leadId);
         const currentOwnerName = currentOwner!.nickname || currentOwner!.displayName;
-        return NextResponse.json({ ok: true, reopen: true, leadId: String(existing.leadId), pushed, salesName: currentOwnerName, salesPhone: currentOwner!.phone ?? null, showroomLabel });
+        return NextResponse.json({ ok: true, reopen: true, leadId: String(existing.leadId), pushed, salesName: currentOwnerName, salesPhone: currentOwner!.phone ?? null, showroomLabel, ...replyMeta(existing.leadId) });
       }
 
       // Toggled on (default): never reassign silently — the owner stays
@@ -235,7 +224,7 @@ export async function POST(request: NextRequest) {
     }
 
     const pushed = await sendWelcomePush(existing.leadId);
-    return NextResponse.json({ ok: true, reopen: true, leadId: String(existing.leadId), pushed, salesName, salesPhone, showroomLabel });
+    return NextResponse.json({ ok: true, reopen: true, leadId: String(existing.leadId), pushed, salesName, salesPhone, showroomLabel, ...replyMeta(existing.leadId) });
   }
 
   const lead = await prisma.lead.create({
@@ -262,5 +251,5 @@ export async function POST(request: NextRequest) {
     },
   });
   const pushed = await sendWelcomePush(lead.leadId);
-  return NextResponse.json({ ok: true, reopen: false, leadId: String(lead.leadId), pushed, salesName, salesPhone, showroomLabel }, { status: 201 });
+  return NextResponse.json({ ok: true, reopen: false, leadId: String(lead.leadId), pushed, salesName, salesPhone, showroomLabel, ...replyMeta(lead.leadId) }, { status: 201 });
 }

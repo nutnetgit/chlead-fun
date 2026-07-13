@@ -47,11 +47,27 @@ export default function LineOaSettingsPage() {
   const [liffDraft, setLiffDraft] = useState<Record<number, string>>({});
   const [liffSavingId, setLiffSavingId] = useState<number | null>(null);
 
+  // Global chat-send kill-switch (user req 2026-07-14) — one toggle for every
+  // brand, since it's about total quota pressure across all OAs, not one.
+  const [chatSendEnabled, setChatSendEnabled] = useState<boolean | null>(null);
+
   const load = () => fetch("/api/settings/line-oa").then((r) => r.json()).then((rs: Row[]) => {
     setRows(rs);
     setLiffDraft(Object.fromEntries(rs.map((r) => [r.brandId, r.liffId ?? ""])));
   });
-  useEffect(() => { load(); }, []);
+  useEffect(() => {
+    load();
+    fetch("/api/settings/features").then((r) => r.json()).then((f) => setChatSendEnabled(f.chatSendEnabled !== false));
+  }, []);
+
+  async function toggleChatSend() {
+    const next = !chatSendEnabled;
+    setChatSendEnabled(next);
+    const res = await fetch("/api/settings/features", {
+      method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ chatSendEnabled: next }),
+    });
+    if (!res.ok) setChatSendEnabled(!next);
+  }
 
   const startEdit = (r: Row) => { setEditingId(r.brandId); setDraft(EMPTY); setError(null); };
   const cancel = () => { setEditingId(null); setDraft(EMPTY); setError(null); };
@@ -93,6 +109,15 @@ export default function LineOaSettingsPage() {
             แต่ละยี่ห้อมี LINE Official Account ของตัวเอง (ใช้ร่วมกันทุกสาขาที่ขายยี่ห้อนั้น) — ลูกค้าคุยกับเซลส์ต่อเนื่องจนตัดสินใจ ไม่ปนกับยี่ห้ออื่น
           </p>
         </div>
+
+        <Card title="ปิดการส่งแชท (ประหยัดโควต้า LINE)" desc="ปิดปุ่มพิมพ์/ส่งข้อความในหน้าแชทของระบบ ทุกยี่ห้อพร้อมกัน — ข้อความขาเข้ายังรับปกติ ไม่กินโควต้า มีผลเฉพาะการพิมพ์ตอบผ่านระบบนี้ (แต่ละครั้งคือ 1 push message) การส่งใบเสนอราคายังใช้งานได้ตามปกติไม่ว่าปิดหรือไม่">
+          <div className="flex items-center gap-3">
+            <Toggle on={!!chatSendEnabled} onClick={toggleChatSend} disabled={chatSendEnabled === null} />
+            <span className={`text-[.85rem] font-medium ${chatSendEnabled ? "text-[var(--green)]" : "text-[var(--red)]"}`}>
+              {chatSendEnabled === null ? "กำลังโหลด…" : chatSendEnabled ? "เปิดอยู่ — เซลส์พิมพ์ตอบลูกค้าในระบบได้ตามปกติ" : "ปิดอยู่ — ช่องพิมพ์ล็อกทุกยี่ห้อ ตอบลูกค้าทาง LINE OA Manager แทน"}
+            </span>
+          </div>
+        </Card>
 
         <Card title="Messaging API — สำหรับแชท/ส่งข้อความ" desc="ยี่ห้อที่ยังไม่ตั้งค่าจะใช้ LINE OA กลางชั่วคราว (ทยอยตั้งค่าได้ทีละยี่ห้อ)">
           {rows === null ? <p className="text-sm text-[var(--text-2)]">Loading…</p> : (

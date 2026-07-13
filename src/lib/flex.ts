@@ -304,7 +304,9 @@ export function buildQuotePdfBubble(opts: {
     footer: {
       type: "box", layout: "vertical",
       contents: [
-        { type: "button", style: "primary", height: "sm", color: "#F2A65A",
+        // App's own gold accent (user req 2026-07-14) — same tone as the
+        // "เพิ่ม Lead" button's --accent-gold in globals.css.
+        { type: "button", style: "primary", height: "sm", color: "#F3B01C",
           action: { type: "uri", label: "ดูรายละเอียดฉบับเต็ม", uri: opts.pdfUrl } },
       ],
     },

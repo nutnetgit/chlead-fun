@@ -4,6 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { verifyLineSignature, lineReply } from "@/lib/lineAuth";
 import { handleSlaPostback, type PostbackAction } from "@/lib/governance";
 import { resolveLineCreds } from "@/lib/lineConfig";
+import { WELCOME_MARKER_PREFIX, buildWelcomeMessages, logWelcomeToChat, deliverWelcomeByPush } from "@/lib/welcome";
 
 const OWNER_SWITCH_ACTIONS = new Set(["keep_owner", "switch_owner"]);
 
@@ -187,6 +188,27 @@ export async function POST(request: NextRequest) {
         // never run BEFORE lead resolution — a staff member testing their
         // own QR flow resolves to a real lead and must still be logged.
         if (activeLeadIds.length === 0) continue;
+
+        // ── Free welcome via Reply API (user req 2026-07-14) ─────────────
+        // The LIFF register page sends this marker AS THE CUSTOMER right
+        // after a successful submit (liff.sendMessages) — its reply token is
+        // our free ride: answer with the greeting via lineReply (0 quota)
+        // instead of the old paid push. Target = the newest lead (the one
+        // just created/reopened by that registration). If the reply fails
+        // (token expired/consumed), fall back to the paid push rather than
+        // leaving the customer greeted by silence. The marker itself still
+        // falls through to the logging loop below like any inbound message.
+        const evReplyToken = (ev as { replyToken?: string }).replyToken;
+        if (msg.text.startsWith(WELCOME_MARKER_PREFIX) && evReplyToken && creds.accessToken) {
+          const newest = ident!.person.leads.reduce((a, b) =>
+            (b.createdAt?.getTime() ?? 0) > (a.createdAt?.getTime() ?? 0) ? b : a);
+          const w = await buildWelcomeMessages(newest.leadId);
+          if (w) {
+            const ok = await lineReply(creds.accessToken, evReplyToken, w.messages);
+            if (ok) await logWelcomeToChat(newest.leadId, w);
+            else await deliverWelcomeByPush(newest.leadId);
+          }
+        }
 
         const targets: bigint[] = activeLeadIds;
 

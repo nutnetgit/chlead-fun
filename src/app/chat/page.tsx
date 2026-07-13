@@ -78,6 +78,11 @@ export default function ChatPage() {
   // Feature switch (ตั้งค่า > ตั้งค่าใบเสนอราคา) — the quote button below
   // only renders while an admin has it turned on.
   const [quotationEnabled, setQuotationEnabled] = useState(false);
+  // Global chat kill-switch (ตั้งค่า > LINE OA, user req 2026-07-14) —
+  // each typed reply is a LINE push and burns the OA's monthly quota; off by
+  // default here means the input row locks and staff are pointed at LINE OA
+  // Manager instead. Quotation sending is unaffected — separate switch above.
+  const [chatSendEnabled, setChatSendEnabled] = useState(true);
   const bottomRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -85,7 +90,10 @@ export default function ChatPage() {
       setConversations(d.conversations ?? []);
     }).catch(() => {});
     loadInbox();
-    fetch("/api/settings/features").then((r) => r.json()).then((f) => setQuotationEnabled(!!f.quotationEnabled)).catch(() => {});
+    fetch("/api/settings/features").then((r) => r.json()).then((f) => {
+      setQuotationEnabled(!!f.quotationEnabled);
+      setChatSendEnabled(f.chatSendEnabled !== false);
+    }).catch(() => {});
     const t = setInterval(loadInbox, 5000);
     return () => clearInterval(t);
   }, []);
@@ -202,16 +210,22 @@ export default function ChatPage() {
             </div>
             <div className="p-3 border-t border-[var(--border)]">
               {error && <p className="text-[.74rem] text-[var(--red)] mb-1.5">❌ {error}</p>}
-              <div className="flex items-center gap-2">
-                <input value={text} onChange={(e) => setText(e.target.value)}
-                  onKeyDown={(e) => { if (e.key === "Enter" && !sending) send(); }}
-                  className="flex-1 px-3.5 py-2.5 text-[.9rem] bg-white border border-[var(--border-2)] rounded-xl focus:outline-none focus:ring-1 focus:ring-[var(--primary)]"
-                  placeholder="พิมพ์ข้อความ…" />
-                <button onClick={send} disabled={sending || !text.trim()}
-                  className="p-2.5 rounded-xl bg-[var(--primary)] text-white hover:bg-[var(--accent-text)] disabled:opacity-50">
-                  {sending ? <Loader2 size={16} className="animate-spin" /> : <Send size={16} />}
-                </button>
-              </div>
+              {!chatSendEnabled ? (
+                <p className="text-[.8rem] text-[var(--text-2)] bg-[var(--bg)] rounded-xl px-3.5 py-2.5 text-center">
+                  ปิดการส่งแชทชั่วคราว (ประหยัดโควต้า LINE) — ตอบลูกค้าทาง LINE OA Manager แทน
+                </p>
+              ) : (
+                <div className="flex items-center gap-2">
+                  <input value={text} onChange={(e) => setText(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === "Enter" && !sending) send(); }}
+                    className="flex-1 px-3.5 py-2.5 text-[.9rem] bg-white border border-[var(--border-2)] rounded-xl focus:outline-none focus:ring-1 focus:ring-[var(--primary)]"
+                    placeholder="พิมพ์ข้อความ…" />
+                  <button onClick={send} disabled={sending || !text.trim()}
+                    className="p-2.5 rounded-xl bg-[var(--primary)] text-white hover:bg-[var(--accent-text)] disabled:opacity-50">
+                    {sending ? <Loader2 size={16} className="animate-spin" /> : <Send size={16} />}
+                  </button>
+                </div>
+              )}
             </div>
           </>
         )}

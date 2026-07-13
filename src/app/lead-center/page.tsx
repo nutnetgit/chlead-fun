@@ -88,10 +88,15 @@ export default function LeadCenterPage() {
   const load = () => { fetch(`/api/leads?filter=${showArchived ? "archived" : "all"}`).then((r) => r.json()).then(setRows); };
   useEffect(load, [showArchived]);
 
+  // Owner cards must reflect whichever brand is currently selected (bug
+  // report 2026-07-14: picking a brand chip filtered the table below but the
+  // per-sales summary cards on top kept counting every brand) — so this
+  // scopes to brandFilter first, same as `filtered` below.
   const owners = useMemo(() => {
+    const scoped = (rows ?? []).filter((r) => !brandFilter || r.brand === brandFilter);
     const m = new Map<string, { name: string; total: number; hot: number; overdue: number; conflicts: number }>();
     const today = new Date(); today.setHours(0, 0, 0, 0);
-    for (const r of rows ?? []) {
+    for (const r of scoped) {
       const key = r.ownerUserId === null ? "none" : String(r.ownerUserId);
       const cur = m.get(key) ?? { name: r.ownerName ?? "ยังไม่มีเจ้าของ", total: 0, hot: 0, overdue: 0, conflicts: 0 };
       cur.total++;
@@ -101,7 +106,7 @@ export default function LeadCenterPage() {
       m.set(key, cur);
     }
     return [...m.entries()].sort((a, b) => b[1].total - a[1].total);
-  }, [rows]);
+  }, [rows, brandFilter]);
 
   // Brand chips only matter (and only render) when the data actually spans
   // more than one brand — a single-brand viewer never sees an empty filter bar.

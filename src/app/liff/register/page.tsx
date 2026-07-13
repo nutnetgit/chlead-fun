@@ -30,6 +30,8 @@ declare global {
     liff?: {
       init: (o: { liffId: string }) => Promise<void>;
       getProfile: () => Promise<{ userId: string; displayName: string; pictureUrl?: string }>;
+      isInClient?: () => boolean;
+      sendMessages?: (messages: { type: "text"; text: string }[]) => Promise<void>;
     };
   }
 }
@@ -146,10 +148,34 @@ function Register() {
         buyTimeframe: timeframe || undefined,
         ownerUserId: Number(ownerUserId), brandId: Number(brandId), branchId: Number(branchId),
         eventId: eventId ? Number(eventId) : undefined,
+        // Reply-token quota play (2026-07-14): inside the LINE app we can
+        // liff.sendMessages() a registration message AS the customer — its
+        // reply token lets the webhook answer with the greeting for FREE.
+        // The server skips its paid push when this flag is present.
+        welcomeVia: window.liff?.isInClient?.() && window.liff?.sendMessages ? "reply" : undefined,
       }),
     });
     setSaving(false);
-    if (res.ok) { setResult(await res.json().catch(() => ({}))); setDone(true); }
+    if (res.ok) {
+      const d = await res.json().catch(() => ({}));
+      // Fire the marker message; the webhook replies with the greeting.
+      // Any failure (customer skipped adding the OA, quirk in the LINE
+      // client) falls back to the old paid push via the signed endpoint —
+      // the customer must never end up silently ungreeted.
+      if (d.expectReply && window.liff?.sendMessages) {
+        try {
+          await window.liff.sendMessages([{ type: "text", text: `ลงทะเบียนสนใจรถ ${brandName || ""} เรียบร้อยแล้ว ✅`.replace("  ", " ") }]);
+          d.pushed = true; // greeting arrives via the free reply path
+        } catch {
+          const fb = await fetch("/api/public/lead/welcome", {
+            method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ leadId: d.leadId, sig: d.welcomeSig }),
+          }).then((r) => r.json()).catch(() => ({ pushed: false }));
+          d.pushed = !!fb.pushed;
+        }
+      }
+      setResult(d); setDone(true);
+    }
     else setError((await res.json().catch(() => ({}))).error ?? "ส่งข้อมูลไม่สำเร็จ กรุณาลองใหม่");
   }
 
