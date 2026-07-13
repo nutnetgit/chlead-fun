@@ -1,0 +1,52 @@
+# Ch.Lead FUN — Settings app on the Synology NAS.
+# Same deploy pipeline as CATS: build `fun:latest` on Windows → save/gzip →
+# pscp to NAS → docker load → `docker compose up -d --force-recreate`
+# (NEVER just restart — a restarted container keeps the old image layers).
+#
+# Ports on the NAS: 3100 = CATS prod · 3101 = CATS staging · 3102 = Ch.Lead FUN
+services:
+  app:
+    image: fun:latest
+    container_name: fun-app
+    restart: unless-stopped
+    ports:
+      - "3102:3000"
+    environment:
+      # n8n_fun user, rights only to the dedicated ch_lead_fun DB (sql/001_fun_schema.sql).
+      # Password Er@w@n12345 is hardcoded URL-encoded (@ → %40) so the URL parses
+      # regardless of .env interpolation — same trick as CATS staging.
+      DATABASE_URL: mysql://n8n_fun:Er%40w%40n12345@mariadb-erawan:3306/ch_lead_fun
+      WEBHOOK_SECRET: ${WEBHOOK_SECRET:-}
+      # Facebook Lead Ads intake (app handles it directly — Phase 2). Values in .env.
+      META_VERIFY_TOKEN: ${META_VERIFY_TOKEN:-}
+      META_APP_SECRET: ${META_APP_SECRET:-}
+      FB_SYSTEM_USER_TOKEN: ${FB_SYSTEM_USER_TOKEN:-}
+      LINE_CHANNEL_ACCESS_TOKEN: ${LINE_CHANNEL_ACCESS_TOKEN:-}
+      # Gemini for scoring / nudges / Aira digest+summary (FUN's OWN key).
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      GEMINI_MODEL: ${GEMINI_MODEL:-gemini-3.1-flash-lite}
+      # LINE Login (auth). Leaving AUTH_LINE_ID/SECRET empty DISABLES auth
+      # entirely (middleware passes everything) — safe soft-launch.
+      AUTH_SECRET: ${AUTH_SECRET:-}
+      AUTH_URL: https://fun.ch-erawan.com
+      AUTH_TRUST_HOST: "true"
+      AUTH_LINE_ID: ${AUTH_LINE_ID:-}
+      AUTH_LINE_SECRET: ${AUTH_LINE_SECRET:-}
+      APP_PUBLIC_URL: https://fun.ch-erawan.com
+      NODE_ENV: production
+      # NEXT_PUBLIC_LIFF_ID, NEXT_PUBLIC_APP_URL, NEXT_PUBLIC_BUILD_VERSION are
+      # baked in at `docker build --build-arg` time (see Dockerfile) — listed
+      # here only as a reminder that they exist, setting them at runtime has
+      # no effect on an already-built image.
+      NEXT_PUBLIC_LIFF_ID: ${NEXT_PUBLIC_LIFF_ID:-}
+      NEXT_PUBLIC_APP_URL: ${NEXT_PUBLIC_APP_URL:-https://fun.ch-erawan.com}
+      NEXT_PUBLIC_BUILD_VERSION: ${NEXT_PUBLIC_BUILD_VERSION:-}
+    networks:
+      - hermes-net        # reach mariadb-erawan
+      # - tunnel-net      # enable when exposing via Cloudflare Tunnel + Access
+
+networks:
+  hermes-net:
+    external: true
+  # tunnel-net:
+  #   external: true

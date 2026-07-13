@@ -1,0 +1,842 @@
+// Prospect 2.0 — Prisma client over the 29 tables in the dedicated `ch_lead_fun`
+// database (mariadb-erawan). Schema is OWNED by sql/001 + 002 + 003 (run as
+// root); this file only mirrors it — NEVER `prisma migrate` here. Relations are
+// declared only where the app traverses them; other FK columns stay plain Ints
+// (the DB still enforces them).
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+// ─── enums ───────────────────────────────────────────────────────────────────
+
+enum PersonType {
+  individual
+  company
+}
+
+enum IdentifierType {
+  phone
+  phone2
+  line_userid
+  line_id
+  fb_psid
+  tiktok_id
+  email
+}
+
+enum ConsentPurpose {
+  contact_sales
+  marketing
+  analytics
+}
+
+enum ConsentChannel {
+  any
+  phone
+  line
+  sms
+  email
+}
+
+enum ConsentStatus {
+  given
+  withdrawn
+}
+
+enum ChannelCategory {
+  walkin
+  phone
+  online_owned
+  online_paid
+  oem
+  event
+  referral
+  service
+  fleet
+  unknown
+}
+
+enum PaymentType {
+  cash
+  finance
+  undecided
+}
+
+enum BuyTimeframe {
+  within_1m
+  m1_3   @map("1_3m")
+  m3_6   @map("3_6m")
+  over_6m
+  unknown
+}
+
+enum LeadStage {
+  new
+  contacted
+  qualified
+  appointment
+  test_drive
+  negotiation
+  finance_check
+  booking
+  contract
+  delivered
+  won
+  lost
+  nurture
+  forfeited
+}
+
+enum Temperature {
+  hot
+  warm
+  cold
+}
+
+enum LeadStatus {
+  active
+  nurture
+  won
+  lost
+  forfeited
+}
+
+enum ActivityType {
+  call_out
+  call_in
+  line_msg
+  fb_msg
+  sms
+  visit_showroom
+  home_visit
+  test_drive
+  quote_sent
+  finance_submitted
+  tradein_appraised
+  booking_made
+  delivery
+  note
+  ai_nudge_sent
+  sla_override
+}
+
+enum ActivityDirection {
+  outbound
+  inbound
+  internal
+}
+
+enum NudgeTrigger {
+  followup_due
+  idle_warning
+  forfeit_warning
+  stock_arrived
+  campaign_match
+  manager_push
+}
+
+enum UserRole {
+  sales
+  manager
+  gm
+  admin
+}
+
+// ─── kept from Ch.Lead FUN ───────────────────────────────────────────────────
+
+model ChannelConfig {
+  configId    Int       @id @default(autoincrement()) @map("config_id")
+  fbPageId    String    @unique @map("fb_page_id") @db.VarChar(30)
+  fbPageName  String?   @map("fb_page_name") @db.VarChar(100)
+  brand       String    @db.VarChar(20)
+  branchCode  String    @map("branch_code") @db.VarChar(10)
+  lineGroupId String    @map("line_group_id") @db.VarChar(50)
+  gsheetId    String?   @map("gsheet_id") @db.VarChar(100)
+  active      Int?      @default(1) @db.TinyInt
+  createdAt   DateTime? @default(now()) @map("created_at")
+  updatedAt   DateTime? @default(now()) @updatedAt @map("updated_at")
+
+  @@map("fun_channel_config")
+}
+
+model Setting {
+  settingKey   String    @id @map("setting_key") @db.VarChar(50)
+  settingValue String?   @map("setting_value") @db.Text
+  updatedAt    DateTime? @default(now()) @updatedAt @map("updated_at")
+
+  @@map("fun_settings")
+}
+
+// ─── dimensions ──────────────────────────────────────────────────────────────
+
+model Branch {
+  branchId        Int     @id @default(autoincrement()) @map("branch_id")
+  branchName      String  @map("branch_name") @db.VarChar(100)
+  branchCode      String? @unique @map("branch_code") @db.VarChar(10)
+  brandId         Int?    @map("brand_id")
+  companyCode     String? @map("company_code") @db.VarChar(10)
+  // Registered juristic entity details per branch (user req 2026-07-11) —
+  // stored for future use on printed documents (quotations, etc.), not
+  // consumed anywhere yet.
+  companyNameFull String? @map("company_name_full") @db.VarChar(200)
+  companyAddress  String? @map("company_address") @db.Text
+  isActive        Int?    @default(1) @map("is_active") @db.TinyInt
+  leads           Lead[]
+  userLinks       UserBranch[]
+
+  @@map("fun_branch")
+}
+
+// Flexible user↔branch access (a person may work across several branches).
+model UserBranch {
+  id       Int @id @default(autoincrement())
+  userId   Int @map("user_id")
+  branchId Int @map("branch_id")
+
+  user   FunUser @relation(fields: [userId], references: [userId])
+  branch Branch  @relation(fields: [branchId], references: [branchId])
+
+  @@unique([userId, branchId], map: "uk_user_branch")
+  @@map("fun_user_branch")
+}
+
+model Brand {
+  brandId    Int    @id @default(autoincrement()) @map("brand_id")
+  brandName  String @unique @map("brand_name") @db.VarChar(50)
+  leads      Lead[]
+  lineConfig BrandLineConfig?
+
+  @@map("fun_brand")
+}
+
+// Per-brand LINE OA credentials (user req 2026-07-11, corrected from
+// per-branch to per-brand same session — a brand's LINE OA is shared by
+// every branch selling that brand) — see sql/019 for the full rationale.
+// Read via src/lib/lineConfig.ts, never returned to the client with the raw
+// token/secret intact (masked in GET /api/settings/line-oa).
+model BrandLineConfig {
+  brandId            Int       @id @map("brand_id")
+  destination        String?   @unique @db.VarChar(50) @map("destination")
+  // TEXT, not VARCHAR(255) — LINE's newer stateless (v2.1, JWT-format)
+  // channel access tokens can exceed 255 chars and were silently failing
+  // to save (user-reported 2026-07-11).
+  channelAccessToken String?   @db.Text @map("channel_access_token")
+  channelSecret      String?   @db.VarChar(100) @map("channel_secret")
+  // LINE Login channel's LIFF app id for this brand's QR→registration flow
+  // (user req 2026-07-11) — independent of the Messaging fields above (a
+  // brand's LIFF can be set up before or after its Messaging token/secret),
+  // public/non-secret (embedded directly in customer-facing QR URLs).
+  liffId             String?   @db.VarChar(50) @map("liff_id")
+  isActive           Int?      @default(1) @db.TinyInt @map("is_active")
+  updatedAt          DateTime? @default(now()) @updatedAt @map("updated_at")
+
+  brand Brand @relation(fields: [brandId], references: [brandId])
+
+  @@map("fun_brand_line_config")
+}
+
+model FunUser {
+  userId      Int      @id @default(autoincrement()) @map("user_id")
+  displayName String   @map("display_name") @db.VarChar(100)
+  nickname    String?  @db.VarChar(50)
+  phone       String?  @db.VarChar(20)
+  role        UserRole @default(sales)
+  branchId    Int?     @map("branch_id")
+  teamId      Int?     @map("team_id")
+  lineUserid  String?  @map("line_userid") @db.VarChar(50)
+  isActive    Int?     @default(1) @map("is_active") @db.TinyInt
+  approvedAt  DateTime? @map("approved_at")
+  pictureUrl  String?  @map("picture_url") @db.VarChar(500)
+  // Username+password login (alongside LINE Login). username is optional —
+  // LINE-only staff need not have one. Admin issues a temp password (mustChangePassword=1);
+  // brute-force lockout mirrors CATS (5 fails → 15 min lock).
+  username           String?   @db.VarChar(50)
+  passwordHash       String?   @map("password_hash") @db.VarChar(255)
+  mustChangePassword Int       @default(0) @map("must_change_password") @db.TinyInt
+  failedLoginCount   Int       @default(0) @map("failed_login_count")
+  lockedUntil        DateTime? @map("locked_until")
+  // Per-user menu access overrides (user req 2026-07-12) — NULL = role
+  // defaults; JSON {"menuKey": bool} otherwise. See src/lib/menuAccess.ts.
+  menuAccess         String?   @map("menu_access") @db.Text
+  branchLinks UserBranch[]
+
+  @@unique([username], map: "uk_user_username")
+  @@map("fun_user")
+}
+
+model Team {
+  teamId        Int     @id @default(autoincrement()) @map("team_id")
+  teamName      String  @map("team_name") @db.VarChar(100)
+  branchId      Int?    @map("branch_id")
+  managerUserId Int?    @map("manager_user_id")
+
+  @@map("fun_team")
+}
+
+model VehicleModel {
+  modelId    Int     @id @default(autoincrement()) @map("model_id")
+  brandId    Int     @map("brand_id")
+  modelName  String  @map("model_name") @db.VarChar(100)
+  modelCode  String? @map("model_code") @db.VarChar(50)
+  isActive   Int?    @default(1) @map("is_active") @db.TinyInt
+  dmsModelId Int?    @map("dms_model_id")
+  colors     VehicleColor[]
+
+  @@map("fun_model")
+}
+
+// Per-model colors; dms_color_id reserved for the future read-only SPS sync.
+model VehicleColor {
+  colorId    Int     @id @default(autoincrement()) @map("color_id")
+  modelId    Int     @map("model_id")
+  colorName  String  @map("color_name") @db.VarChar(50)
+  isActive   Int?    @default(1) @map("is_active") @db.TinyInt
+  dmsColorId Int?    @map("dms_color_id")
+
+  model VehicleModel @relation(fields: [modelId], references: [modelId])
+
+  @@unique([modelId, colorName], map: "uk_model_color")
+  @@map("fun_vehicle_color")
+}
+
+model DutyRoster {
+  rosterId  Int      @id @default(autoincrement()) @map("roster_id")
+  branchId  Int      @map("branch_id")
+  dutyDate  DateTime @map("duty_date") @db.Date
+  userId    Int      @map("user_id")
+  slot      String?  @db.VarChar(20)
+
+  @@map("fun_duty_roster")
+}
+
+model StockSnapshot {
+  snapId   BigInt   @id @default(autoincrement()) @map("snap_id")
+  snapDate DateTime @map("snap_date") @db.Date
+  branchId Int      @map("branch_id")
+  modelId  Int      @map("model_id")
+  variant  String?  @db.VarChar(100)
+  color    String?  @db.VarChar(50)
+  qty      Int      @default(0)
+
+  @@map("fun_stock_snapshot")
+}
+
+model KpiDaily {
+  kpiId               BigInt   @id @default(autoincrement()) @map("kpi_id")
+  kpiDate             DateTime @map("kpi_date") @db.Date
+  branchId            Int      @map("branch_id")
+  userId              Int?     @map("user_id")
+  newLeads            Int      @default(0) @map("new_leads")
+  contacted           Int      @default(0)
+  appointments        Int      @default(0)
+  testDrives          Int      @default(0) @map("test_drives")
+  quotes              Int      @default(0)
+  bookings            Int      @default(0)
+  deliveries          Int      @default(0)
+  lost                Int      @default(0)
+  avgFirstResponseMin Int?     @map("avg_first_response_min")
+  slaBreaches         Int      @default(0) @map("sla_breaches")
+
+  @@unique([kpiDate, branchId, userId], map: "uk_kpi")
+  @@map("fun_kpi_daily")
+}
+
+// ─── customer master ─────────────────────────────────────────────────────────
+
+model Person {
+  personId      BigInt     @id @default(autoincrement()) @map("person_id")
+  personType    PersonType @default(individual) @map("person_type")
+  prefix        String?    @db.VarChar(20)
+  firstName     String?    @map("first_name") @db.VarChar(100)
+  lastName      String?    @map("last_name") @db.VarChar(100)
+  nickname      String?    @db.VarChar(50)
+  citizenIdHash String?    @map("citizen_id_hash") @db.Char(64)
+  citizenIdEnc  Bytes?     @map("citizen_id_enc") @db.VarBinary(255)
+  birthdate     DateTime?  @db.Date
+  occupation    String?    @db.VarChar(100)
+  companyName   String?    @map("company_name") @db.VarChar(200)
+  addrNo        String?    @map("addr_no") @db.VarChar(50)
+  addrStreet    String?    @map("addr_street") @db.VarChar(150)
+  addrTambon    String?    @map("addr_tambon") @db.VarChar(100)
+  addrAmphur    String?    @map("addr_amphur") @db.VarChar(100)
+  addrProvince  String?    @map("addr_province") @db.VarChar(100)
+  addrZip       String?    @map("addr_zip") @db.VarChar(10)
+  // Customer's LINE profile picture (user req 2026-07-11) — captured from
+  // liff.getProfile().pictureUrl at registration, shown in /chat instead of
+  // the generated color-avatar when present (see src/app/chat/page.tsx).
+  pictureUrl    String?    @map("picture_url") @db.VarChar(500)
+  mergedInto    BigInt?    @map("merged_into")
+  createdAt     DateTime?  @default(now()) @map("created_at")
+  updatedAt     DateTime?  @default(now()) @updatedAt @map("updated_at")
+  createdBy     Int?       @map("created_by")
+
+  identifiers PersonIdentifier[]
+  consents    PersonConsent[]
+  leads       Lead[]
+
+  @@map("fun_person")
+}
+
+model PersonIdentifier {
+  identifierId BigInt         @id @default(autoincrement()) @map("identifier_id")
+  personId     BigInt         @map("person_id")
+  idType       IdentifierType @map("id_type")
+  idValue      String         @map("id_value") @db.VarChar(255)
+  isPrimary    Int?           @default(0) @map("is_primary") @db.TinyInt
+  verifiedAt   DateTime?      @map("verified_at")
+
+  person Person @relation(fields: [personId], references: [personId])
+
+  @@unique([idType, idValue], map: "uk_identifier")
+  @@map("fun_person_identifier")
+}
+
+model PersonConsent {
+  consentId  BigInt         @id @default(autoincrement()) @map("consent_id")
+  personId   BigInt         @map("person_id")
+  purpose    ConsentPurpose
+  channel    ConsentChannel @default(any)
+  status     ConsentStatus
+  recordedAt DateTime?      @default(now()) @map("recorded_at")
+  recordedBy String?        @map("recorded_by") @db.VarChar(100)
+  sourceNote String?        @map("source_note") @db.VarChar(255)
+
+  person Person @relation(fields: [personId], references: [personId])
+
+  @@map("fun_person_consent")
+}
+
+// ─── source & campaign ───────────────────────────────────────────────────────
+
+model SourceChannel {
+  channelId         Int             @id @default(autoincrement()) @map("channel_id")
+  category          ChannelCategory
+  channelName       String          @map("channel_name") @db.VarChar(100)
+  responsiblePerson String?         @map("responsible_person") @db.VarChar(100)
+  budget            Decimal?        @db.Decimal(12, 2)
+  isActive          Int?            @default(1) @map("is_active") @db.TinyInt
+  leads             Lead[]
+
+  @@map("fun_source_channel")
+}
+
+model Campaign {
+  campaignId       Int       @id @default(autoincrement()) @map("campaign_id")
+  campaignName     String    @map("campaign_name") @db.VarChar(200)
+  channelId        Int?      @map("channel_id")
+  brandId          Int?      @map("brand_id")
+  startDate        DateTime? @map("start_date") @db.Date
+  endDate          DateTime? @map("end_date") @db.Date
+  budget           Decimal?  @db.Decimal(12, 2)
+  actualCost       Decimal?  @map("actual_cost") @db.Decimal(12, 2)
+  utmCode          String?   @map("utm_code") @db.VarChar(100)
+  targetLeads      Int?      @map("target_leads")
+  // Manager-settable text pushed to a customer via LINE OA when they follow
+  // through this event's QR (user req 2026-07-08).
+  linePromoMessage String?   @map("line_promo_message") @db.Text
+  brands           CampaignBrand[]
+  targets          CampaignTarget[]
+
+  @@map("fun_campaign")
+}
+
+// Brands attending an event (an event can host several of the group's brands).
+model CampaignBrand {
+  id         Int @id @default(autoincrement())
+  campaignId Int @map("campaign_id")
+  brandId    Int @map("brand_id")
+
+  campaign Campaign @relation(fields: [campaignId], references: [campaignId])
+
+  @@unique([campaignId, brandId], map: "uk_campaign_brand")
+  @@map("fun_campaign_brand")
+}
+
+// Per-salesperson lead allocation target for an event (metrics: actual vs target).
+model CampaignTarget {
+  id          Int @id @default(autoincrement())
+  campaignId  Int @map("campaign_id")
+  userId      Int @map("user_id")
+  targetLeads Int @default(0) @map("target_leads")
+
+  campaign Campaign @relation(fields: [campaignId], references: [campaignId])
+
+  @@unique([campaignId, userId], map: "uk_campaign_user")
+  @@map("fun_campaign_target")
+}
+
+// ─── lead core ───────────────────────────────────────────────────────────────
+
+model LostReason {
+  reasonId    Int    @id @default(autoincrement()) @map("reason_id")
+  reasonGroup String @map("reason_group") @db.VarChar(20)
+  reasonName  String @map("reason_name") @db.VarChar(100)
+
+  @@map("fun_lost_reason")
+}
+
+model Lead {
+  leadId            BigInt       @id @default(autoincrement()) @map("lead_id")
+  personId          BigInt       @map("person_id")
+  branchId          Int          @map("branch_id")
+  brandId           Int          @map("brand_id")
+  channelId         Int          @map("channel_id")
+  campaignId        Int?         @map("campaign_id")
+  referrerPersonId  BigInt?      @map("referrer_person_id")
+  interestedModelId Int?         @map("interested_model_id")
+  interestedVariant String?      @map("interested_variant") @db.VarChar(100)
+  interestedColor   String?      @map("interested_color") @db.VarChar(50)
+  paymentType       PaymentType? @default(undecided) @map("payment_type")
+  budgetMin         Decimal?     @map("budget_min") @db.Decimal(12, 2)
+  budgetMax         Decimal?     @map("budget_max") @db.Decimal(12, 2)
+  buyTimeframe      BuyTimeframe? @default(unknown) @map("buy_timeframe")
+  hasTradein        Int?         @default(0) @map("has_tradein") @db.TinyInt
+  stage             LeadStage    @default(new)
+  temperature       Temperature?
+  temperatureConflict Int?       @default(0) @map("temperature_conflict") @db.TinyInt
+  aiScore           Int?         @map("ai_score") @db.TinyInt
+  aiScoreReason     String?      @map("ai_score_reason") @db.VarChar(255)
+  ownerUserId       Int?         @map("owner_user_id")
+  status            LeadStatus   @default(active)
+  lostReasonId      Int?         @map("lost_reason_id")
+  expectedCloseDate DateTime?    @map("expected_close_date") @db.Date
+  dmsProsId         Int?         @map("dms_pros_id")
+  originLeadId      BigInt?      @map("origin_lead_id")
+  fbLeadgenId       String?      @map("fb_leadgen_id") @db.VarChar(50)
+  fbPageId          String?      @map("fb_page_id") @db.VarChar(30)
+  createdAt         DateTime?    @default(now()) @map("created_at")
+  firstResponseAt   DateTime?    @map("first_response_at")
+  lastActivityAt    DateTime?    @map("last_activity_at")
+  nextActionAt      DateTime?    @map("next_action_at")
+  // Soft-archive (CATS candidate parity): non-null hides the lead from the
+  // default working views, data kept forever for historical/compliance lookup.
+  archivedAt        DateTime?    @map("archived_at")
+
+  person     Person             @relation(fields: [personId], references: [personId])
+  branch     Branch             @relation(fields: [branchId], references: [branchId])
+  brand      Brand              @relation(fields: [brandId], references: [brandId])
+  channel    SourceChannel      @relation(fields: [channelId], references: [channelId])
+  activities Activity[]
+  history    LeadStageHistory[]
+  nudges     NudgeLog[]
+  slaEvents  SlaEvent[]
+
+  @@index([ownerUserId, status], map: "idx_lead_owner")
+  @@index([stage], map: "idx_lead_stage")
+  @@index([nextActionAt], map: "idx_lead_next_action")
+  @@index([lastActivityAt], map: "idx_lead_last_activity")
+  @@index([personId], map: "idx_lead_person")
+  @@index([fbLeadgenId], map: "idx_lead_fb")
+  @@index([archivedAt], map: "idx_lead_archived")
+  @@map("fun_lead")
+}
+
+model LeadStageHistory {
+  historyId BigInt    @id @default(autoincrement()) @map("history_id")
+  leadId    BigInt    @map("lead_id")
+  fromStage String?   @map("from_stage") @db.VarChar(20)
+  toStage   String    @map("to_stage") @db.VarChar(20)
+  changedBy Int?      @map("changed_by")
+  changedAt DateTime? @default(now()) @map("changed_at")
+  note      String?   @db.VarChar(255)
+
+  lead Lead @relation(fields: [leadId], references: [leadId])
+
+  @@index([leadId, changedAt], map: "idx_stagehist")
+  @@map("fun_lead_stage_history")
+}
+
+// ─── activity ────────────────────────────────────────────────────────────────
+
+model Activity {
+  activityId     BigInt             @id @default(autoincrement()) @map("activity_id")
+  leadId         BigInt             @map("lead_id")
+  activityType   ActivityType       @map("activity_type")
+  direction      ActivityDirection? @default(internal)
+  outcome        String?            @db.VarChar(30)
+  summary        String?            @db.VarChar(255)
+  detail         String?            @db.Text
+  voiceNoteUrl   String?            @map("voice_note_url") @db.VarChar(500)
+  transcript     String?            @db.Text
+  nextActionType String?            @map("next_action_type") @db.VarChar(20)
+  nextActionAt   DateTime?          @map("next_action_at")
+  createdBy      Int?               @map("created_by")
+  createdAt      DateTime?          @default(now()) @map("created_at")
+
+  lead Lead @relation(fields: [leadId], references: [leadId])
+
+  @@index([leadId, createdAt], map: "idx_activity")
+  @@map("fun_activity")
+}
+
+model Appointment {
+  appointmentId  BigInt    @id @default(autoincrement()) @map("appointment_id")
+  leadId         BigInt    @map("lead_id")
+  apptType       String    @map("appt_type") @db.VarChar(20)
+  scheduledAt    DateTime  @map("scheduled_at")
+  status         String?   @default("scheduled") @db.VarChar(15)
+  testDriveModel Int?      @map("test_drive_model")
+  notes          String?   @db.VarChar(500)
+  createdBy      Int?      @map("created_by")
+  createdAt      DateTime? @default(now()) @map("created_at")
+
+  @@index([leadId, scheduledAt], map: "idx_appt")
+  @@map("fun_appointment")
+}
+
+// ─── commercial ──────────────────────────────────────────────────────────────
+
+// Quotation groundwork only (ADR-015, proposed): full quotation PDF generation
+// is blocked pending SPS vehicle model/price data — this is settings scaffolding
+// (of แถม / ประเภททะเบียน-ประกัน) so the data-entry work isn't wasted once the
+// PDF piece unblocks. One generic lookup table since the exact field shape
+// isn't finalized yet.
+model QuoteOption {
+  optionId    Int      @id @default(autoincrement()) @map("option_id")
+  optionType  String   @map("option_type") @db.VarChar(30)
+  optionName  String   @map("option_name") @db.VarChar(150)
+  optionValue Decimal? @map("option_value") @db.Decimal(12, 2)
+  isActive    Int?     @default(1) @map("is_active") @db.TinyInt
+  sortOrder   Int?     @map("sort_order")
+  createdAt   DateTime? @default(now()) @map("created_at")
+
+  @@map("fun_quote_option")
+}
+
+model Quotation {
+  quoteId          BigInt    @id @default(autoincrement()) @map("quote_id")
+  leadId           BigInt    @map("lead_id")
+  quoteNo          String?   @map("quote_no") @db.VarChar(30)
+  version          Int?      @default(1) @db.TinyInt
+  modelId          Int?      @map("model_id")
+  variant          String?   @db.VarChar(100)
+  color            String?   @db.VarChar(50)
+  listPrice        Decimal?  @map("list_price") @db.Decimal(12, 2)
+  discount         Decimal?  @db.Decimal(12, 2)
+  accessoriesValue Decimal?  @map("accessories_value") @db.Decimal(12, 2)
+  // Itemized delivery-day cash breakdown (user req 2026-07-13) — separate
+  // from accessoriesValue so the PDF can show what's owed beyond the car
+  // itself: registration fee, compulsory (พ.ร.บ.) insurance, and — for
+  // finance deals — the first loan installment due at delivery.
+  registrationFee     Decimal?  @map("registration_fee") @db.Decimal(12, 2)
+  compulsoryInsurance Decimal?  @map("compulsory_insurance") @db.Decimal(12, 2)
+  firstInstallment    Decimal?  @map("first_installment") @db.Decimal(12, 2)
+  campaignId       Int?      @map("campaign_id")
+  totalPrice       Decimal?  @map("total_price") @db.Decimal(12, 2)
+  validUntil       DateTime? @map("valid_until") @db.Date
+  status           String?   @default("draft") @db.VarChar(15)
+  // 'cash' | 'finance' | NULL — plain VARCHAR per the sql/006 convention.
+  paymentType      String?   @map("payment_type") @db.VarChar(15)
+  colorPriceAdjust Decimal?  @map("color_price_adjust") @db.Decimal(12, 2)
+  depositAmount    Decimal?  @map("deposit_amount") @db.Decimal(12, 2)
+  // Unguessable id for the customer-facing PDF link pushed over LINE — the
+  // customer opens it without logging in, so it must not be enumerable.
+  shareToken       String?   @unique @map("share_token") @db.VarChar(40)
+  sentAt           DateTime? @map("sent_at")
+  createdBy        Int?      @map("created_by")
+  createdAt        DateTime? @default(now()) @map("created_at")
+
+  items QuotationItem[]
+
+  @@index([leadId, version], map: "idx_quote")
+  @@map("fun_quotation")
+}
+
+// One row per selected option on a quote — a SNAPSHOT of name/value at quote
+// time, so renaming/deleting rows in fun_quote_option later never corrupts
+// an already-issued quotation. is_free: 1 = ของแถม, 0 = ซื้อ (adds to total).
+model QuotationItem {
+  itemId     BigInt   @id @default(autoincrement()) @map("item_id")
+  quoteId    BigInt   @map("quote_id")
+  optionType String   @map("option_type") @db.VarChar(30)
+  itemName   String   @map("item_name") @db.VarChar(150)
+  itemValue  Decimal? @map("item_value") @db.Decimal(12, 2)
+  isFree     Int?     @default(0) @map("is_free") @db.TinyInt
+
+  quote Quotation @relation(fields: [quoteId], references: [quoteId])
+
+  @@index([quoteId], map: "idx_qitem")
+  @@map("fun_quotation_item")
+}
+
+model FinanceApplication {
+  finappId       BigInt    @id @default(autoincrement()) @map("finapp_id")
+  leadId         BigInt    @map("lead_id")
+  financier      String    @db.VarChar(100)
+  downPayment    Decimal?  @map("down_payment") @db.Decimal(12, 2)
+  termMonths     Int?      @map("term_months") @db.SmallInt
+  monthlyEst     Decimal?  @map("monthly_est") @db.Decimal(10, 2)
+  status         String?   @default("preparing_docs") @db.VarChar(20)
+  approvedAmount Decimal?  @map("approved_amount") @db.Decimal(12, 2)
+  decisionAt     DateTime? @map("decision_at")
+  rejectReason   String?   @map("reject_reason") @db.VarChar(255)
+
+  @@index([leadId], map: "idx_finapp")
+  @@map("fun_finance_application")
+}
+
+model TradeinAppraisal {
+  appraisalId    BigInt    @id @default(autoincrement()) @map("appraisal_id")
+  leadId         BigInt    @map("lead_id")
+  vehicleBrand   String?   @map("vehicle_brand") @db.VarChar(50)
+  vehicleModel   String?   @map("vehicle_model") @db.VarChar(100)
+  vehicleYear    Int?      @map("vehicle_year") @db.SmallInt
+  plateLast4     String?   @map("plate_last4") @db.VarChar(10)
+  mileage        Int?
+  appraisedValue Decimal?  @map("appraised_value") @db.Decimal(12, 2)
+  appraisedBy    Int?      @map("appraised_by")
+  photosUrl      String?   @map("photos_url") @db.VarChar(500)
+  status         String?   @default("pending") @db.VarChar(10)
+  createdAt      DateTime? @default(now()) @map("created_at")
+
+  @@map("fun_tradein_appraisal")
+}
+
+// ─── booking handoff (funnel end) ────────────────────────────────────────────
+
+model BookingHandoff {
+  handoffId         BigInt    @id @default(autoincrement()) @map("handoff_id")
+  leadId            BigInt    @unique @map("lead_id")
+  personId          BigInt    @map("person_id")
+  handoffNo         String?   @map("handoff_no") @db.VarChar(30)
+  customerFullname  String?   @map("customer_fullname") @db.VarChar(200)
+  customerAddrFull  String?   @map("customer_addr_full") @db.Text
+  citizenIdEnc      Bytes?    @map("citizen_id_enc") @db.VarBinary(255)
+  model             String?   @db.VarChar(100)
+  variant           String?   @db.VarChar(100)
+  color             String?   @db.VarChar(50)
+  agreedPrice       Decimal?  @map("agreed_price") @db.Decimal(12, 2)
+  discount          Decimal?  @db.Decimal(12, 2)
+  accessoriesNote   String?   @map("accessories_note") @db.Text
+  tradeinNote       String?   @map("tradein_note") @db.Text
+  financeNote       String?   @map("finance_note") @db.Text
+  depositExpected   Decimal?  @map("deposit_expected") @db.Decimal(12, 2)
+  status            String?   @default("ready") @db.VarChar(20)
+  generatedBy       Int?      @map("generated_by")
+  generatedAt       DateTime? @default(now()) @map("generated_at")
+  completedAt       DateTime? @map("completed_at")
+
+  @@map("fun_booking_handoff")
+}
+
+// ─── governance ──────────────────────────────────────────────────────────────
+
+model SlaRule {
+  ruleId               Int       @id @default(autoincrement()) @map("rule_id")
+  scopeBrandId         Int?      @map("scope_brand_id")
+  scopeBranchId        Int?      @map("scope_branch_id")
+  applyTemperature     String    @default("any") @map("apply_temperature") @db.VarChar(5)
+  applyChannelCategory String?   @map("apply_channel_category") @db.VarChar(30)
+  firstResponseMinutes Int?      @map("first_response_minutes")
+  followupIntervalDays Int?      @map("followup_interval_days")
+  idleNudgeDays        Int?      @map("idle_nudge_days")
+  idleEscalateDays     Int?      @map("idle_escalate_days")
+  idleForfeitDays      Int?      @map("idle_forfeit_days")
+  isActive             Int?      @default(1) @map("is_active") @db.TinyInt
+  effectiveFrom        DateTime? @map("effective_from") @db.Date
+
+  @@map("fun_sla_rule")
+}
+
+model SlaEvent {
+  eventId    BigInt    @id @default(autoincrement()) @map("event_id")
+  leadId     BigInt    @map("lead_id")
+  ruleId     Int?      @map("rule_id")
+  eventType  String    @map("event_type") @db.VarChar(25)
+  detectedAt DateTime? @default(now()) @map("detected_at")
+  notifiedTo Int?      @map("notified_to")
+  resolvedAt DateTime? @map("resolved_at")
+  resolution String?   @db.VarChar(20)
+  exemptedBy Int?      @map("exempted_by")
+
+  lead Lead @relation(fields: [leadId], references: [leadId])
+
+  @@index([leadId, eventType, detectedAt], map: "idx_sla_event")
+  @@map("fun_sla_event")
+}
+
+model AssignmentHistory {
+  assignId   BigInt    @id @default(autoincrement()) @map("assign_id")
+  leadId     BigInt    @map("lead_id")
+  fromUserId Int?      @map("from_user_id")
+  toUserId   Int?      @map("to_user_id")
+  reason     String    @db.VarChar(20)
+  assignedBy Int?      @map("assigned_by")
+  assignedAt DateTime? @default(now()) @map("assigned_at")
+
+  @@index([leadId, assignedAt], map: "idx_assign")
+  @@map("fun_assignment_history")
+}
+
+// Customer-consent ownership switch (user req 2026-07-10) — see
+// sql/018_owner_switch_request.sql for the full rationale.
+model OwnerSwitchRequest {
+  requestId       Int       @id @default(autoincrement()) @map("request_id")
+  leadId          BigInt    @map("lead_id")
+  currentOwnerId  Int       @map("current_owner_id")
+  offeredOwnerId  Int       @map("offered_owner_id")
+  status          String    @default("pending") @db.VarChar(15) // pending | kept | switched
+  createdAt       DateTime? @default(now()) @map("created_at")
+  resolvedAt      DateTime? @map("resolved_at")
+
+  @@index([leadId], map: "idx_switch_lead")
+  @@map("fun_owner_switch_request")
+}
+
+model LeadPool {
+  poolId        BigInt    @id @default(autoincrement()) @map("pool_id")
+  leadId        BigInt    @map("lead_id")
+  enteredAt     DateTime? @default(now()) @map("entered_at")
+  enteredReason String    @map("entered_reason") @db.VarChar(15)
+  claimedBy     Int?      @map("claimed_by")
+  claimedAt     DateTime? @map("claimed_at")
+  priority      Int?      @default(0) @db.TinyInt
+
+  @@index([claimedAt, priority], map: "idx_pool")
+  @@map("fun_lead_pool")
+}
+
+// ─── AI / nudge ──────────────────────────────────────────────────────────────
+
+model NudgeLog {
+  nudgeId      BigInt       @id @default(autoincrement()) @map("nudge_id")
+  leadId       BigInt       @map("lead_id")
+  salesUserId  Int?         @map("sales_user_id")
+  triggerType  NudgeTrigger @map("trigger_type")
+  draftMessage String?      @map("draft_message") @db.Text
+  aiModel      String?      @map("ai_model") @db.VarChar(50)
+  pushedAt     DateTime?    @map("pushed_at")
+  salesAction  String?      @map("sales_action") @db.VarChar(20)
+  actedAt      DateTime?    @map("acted_at")
+
+  lead Lead @relation(fields: [leadId], references: [leadId])
+
+  @@index([leadId, pushedAt], map: "idx_nudge")
+  @@map("fun_nudge_log")
+}
+
+// In-house LINE chat (user req 2026-07-08). Deliberately separate from
+// Activity — see sql/016_chat_message.sql comment: the trg_activity_touch_lead
+// trigger would let inbound customer chatter fake SLA freshness if messages
+// were logged as Activity rows. leadId is nullable — a message from a LINE
+// user we can't resolve to any lead is kept (not dropped) for manual triage.
+model ChatMessage {
+  messageId    BigInt    @id @default(autoincrement()) @map("message_id")
+  leadId       BigInt?   @map("lead_id")
+  direction    String    @db.VarChar(10)   // 'inbound' | 'outbound'
+  lineUserId   String    @map("line_user_id") @db.VarChar(50)
+  sentByUserId Int?      @map("sent_by_user_id")
+  lineMessageId String?  @map("line_message_id") @db.VarChar(50)
+  body         String?   @db.Text
+  createdAt    DateTime? @default(now()) @map("created_at")
+
+  @@index([lineMessageId], map: "idx_line_message")
+  @@index([leadId, createdAt], map: "idx_chat_lead")
+  @@map("fun_chat_message")
+}

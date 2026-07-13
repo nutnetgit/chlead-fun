@@ -1,0 +1,203 @@
+"use client";
+
+// Run Rate v2 — count-based, month-by-month with carry-over. Salespeople see
+// their own numbers; managers see the team and set targets (team + per-sales).
+
+import { useEffect, useState, useCallback } from "react";
+import { Loader2, TrendingUp, AlertTriangle } from "lucide-react";
+import { Card, inputCls } from "@/components/ui";
+import { useMe } from "@/components/Chrome";
+
+type Data = {
+  scope: string;
+  config: { target: number | null; teamMonthlyTarget: number | null; perUser: Record<string, number> };
+  month: { name: number; daysElapsed: number; daysLeft: number; daysInMonth: number; actualBookings: number; target: number | null; carryIn: number; neededThisMonth: number | null };
+  leads: { toDate: number; projected: number; expectedRest: number };
+  conversion: { windowDays: number; cohortLeads: number; cohortConverted: number; rate: number };
+  weightedPipeline: {
+    hot: { count: number; probabilityPct: number; expected: number };
+    warm: { count: number; probabilityPct: number; expected: number };
+    cold: { count: number; probabilityPct: number; expected: number };
+    total: number;
+  };
+  forecast: { projectedBookings: number };
+  monthsTable: { month: number; actual: number; target: number | null; carry: number | null }[];
+  note: string;
+};
+type UserRow = { userId: number; displayName: string; role: string };
+
+const TH_M = ["ม.ค.", "ก.พ.", "มี.ค.", "เม.ย.", "พ.ค.", "มิ.ย.", "ก.ค.", "ส.ค.", "ก.ย.", "ต.ค.", "พ.ย.", "ธ.ค."];
+const pct = (n: number) => `${(n * 100).toFixed(1)}%`;
+
+export default function RunRatePage() {
+  const me = useMe();
+  const isSales = me?.user?.role === "sales";
+  const [d, setD] = useState<Data | null>(null);
+  const [users, setUsers] = useState<UserRow[]>([]);
+  const [teamTarget, setTeamTarget] = useState("");
+  const [perUser, setPerUser] = useState<Record<string, string>>({});
+  const [saving, setSaving] = useState(false);
+
+  const load = useCallback(() => {
+    const q = isSales && me?.user ? `?owner=${me.user.funUserId}` : "";
+    fetch(`/api/runrate${q}`).then((r) => r.json()).then((data: Data) => {
+      setD(data);
+      setTeamTarget(data.config.teamMonthlyTarget ? String(data.config.teamMonthlyTarget) : "");
+      setPerUser(Object.fromEntries(Object.entries(data.config.perUser).map(([k, v]) => [k, String(v)])));
+    });
+  }, [isSales, me]);
+  useEffect(() => { load(); }, [load]);
+  useEffect(() => {
+    fetch("/api/users").then((r) => r.json()).then((us: UserRow[]) => setUsers(us.filter((u) => u.role === "sales" || u.role === "manager")));
+  }, []);
+
+  async function saveConfig() {
+    setSaving(true);
+    await fetch("/api/runrate", {
+      method: "PUT", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        teamMonthlyTarget: teamTarget ? Number(teamTarget) : undefined,
+        perUser: Object.fromEntries(Object.entries(perUser).filter(([, v]) => v && Number(v) > 0).map(([k, v]) => [k, Number(v)])),
+      }),
+    });
+    setSaving(false); load();
+  }
+
+  if (!d) return <p className="text-sm text-[var(--text-2)]">Loading…</p>;
+  const m = d.month;
+  const hasTarget = m.target !== null;
+  const done = m.neededThisMonth === 0;
+
+  return (
+    <div className="space-y-5">
+      <div>
+        <h1 className="text-[1.7rem]">Run Rate เป้าเดือน {TH_M[m.name - 1]}</h1>
+        <p className="text-[var(--text-2)] text-[.95rem]">นับจำนวนจอง (จองได้ = จบเคส) · เกินเป้าเดือนนี้ยกไปเดือนหน้า · เหลืออีก {m.daysLeft} วัน</p>
+      </div>
+
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        {[
+          { l: `จองแล้วเดือนนี้${hasTarget ? ` / เป้า ${m.target}` : ""}`, v: `${m.actualBookings}${hasTarget ? ` / ${m.target}` : ""}`, cls: done ? "text-[var(--green)]" : "" },
+          { l: "ยอดยกมา (สะสมทั้งปี)", v: m.carryIn > 0 ? `+${m.carryIn}` : String(m.carryIn), cls: m.carryIn >= 0 ? "text-[var(--green)]" : "text-[var(--red)]" },
+          { l: "ต้องจองอีกในเดือนนี้", v: m.neededThisMonth ?? "—", cls: done ? "text-[var(--green)]" : "text-[var(--accent-text)]" },
+          { l: `Conversion (${d.conversion.cohortConverted}/${d.conversion.cohortLeads})`, v: pct(d.conversion.rate), cls: "" },
+        ].map((c) => (
+          <div key={c.l} className="bg-white border border-[var(--border)] rounded-xl px-4 py-3 shadow-[var(--shadow)]">
+            <div className="text-[.7rem] text-[var(--text-2)]">{c.l}</div>
+            <div className={`text-xl font-semibold num mt-0.5 ${c.cls}`}>{c.v}</div>
+          </div>
+        ))}
+      </div>
+
+      {hasTarget && m.neededThisMonth !== null && (
+        <div className={`rounded-2xl border p-5 ${done ? "bg-[var(--green-soft)] border-[var(--green)]" : "bg-[var(--accent-soft)] border-[var(--primary)]"}`}>
+          {done ? (
+            <div className="flex items-center gap-2 font-medium text-[.95rem]">
+              <TrendingUp size={18} className="text-[var(--green)]" /> ถึงเป้าเดือนนี้แล้ว 🎉 — ที่จองเพิ่มจากนี้ยกไปเดือน {TH_M[m.name % 12]}
+            </div>
+          ) : (
+            <>
+              <div className="flex items-center gap-2 font-medium text-[.95rem]">
+                <AlertTriangle size={18} className="text-[var(--accent-text)]" />
+                ต้องจองอีก <b className="num">{m.neededThisMonth} เคส</b> ใน {m.daysLeft} วันที่เหลือ
+              </div>
+              {d.forecast && (
+                <div className="mt-3 grid md:grid-cols-3 gap-2 text-[.82rem]">
+                  <div className="bg-white rounded-xl p-3">
+                    <div className="text-[.7rem] text-[var(--text-3)]">Lead ที่ต้องใช้ (ที่ CR {pct(d.conversion.rate)})</div>
+                    <b className="num text-lg">{d.conversion.rate > 0 ? Math.ceil(m.neededThisMonth / d.conversion.rate) : "—"} ราย</b>
+                  </div>
+                  <div className="bg-white rounded-xl p-3">
+                    <div className="text-[.7rem] text-[var(--text-3)]">Lead ที่คาดว่าจะเข้าเองช่วงที่เหลือ</div>
+                    <b className="num text-lg">{d.leads.expectedRest} ราย</b>
+                  </div>
+                  <div className="bg-white rounded-xl p-3">
+                    <div className="text-[.7rem] text-[var(--text-3)]">🔍 ต้องหา Lead เพิ่มอีก</div>
+                    <b className={`num text-lg ${d.conversion.rate > 0 && Math.max(0, Math.ceil(m.neededThisMonth / d.conversion.rate) - d.leads.expectedRest) > 0 ? "text-[var(--red)]" : "text-[var(--green)]"}`}>
+                      {d.conversion.rate > 0 ? Math.max(0, Math.ceil(m.neededThisMonth / d.conversion.rate) - d.leads.expectedRest) : "—"} ราย
+                    </b>
+                  </div>
+                </div>
+              )}
+            </>
+          )}
+        </div>
+      )}
+
+      <Card title="Weighted Pipeline (พยากรณ์จาก Lead ที่เปิดอยู่)" desc="Lead ที่ active ตอนนี้ × โอกาสปิดของแต่ละระดับ (ตั้งค่าได้ที่ /settings/conversion-rates)">
+        <div className="grid grid-cols-3 gap-3">
+          {([
+            { key: "hot", label: "HOT", cls: "text-[var(--red)]" },
+            { key: "warm", label: "WARM", cls: "text-[var(--amber)]" },
+            { key: "cold", label: "COLD", cls: "text-[var(--text-2)]" },
+          ] as const).map((t) => {
+            const tier = d.weightedPipeline[t.key];
+            return (
+              <div key={t.key} className="bg-white border border-[var(--border)] rounded-xl px-3 py-2.5">
+                <div className={`text-[.72rem] font-semibold ${t.cls}`}>{t.label}</div>
+                <div className="text-[.78rem] text-[var(--text-2)] mt-0.5">{tier.count} ราย × {tier.probabilityPct}%</div>
+                <div className="text-lg font-semibold num mt-0.5">{tier.expected}</div>
+              </div>
+            );
+          })}
+        </div>
+        <div className="mt-3 flex items-center justify-between rounded-xl bg-[var(--accent-soft)] px-4 py-3">
+          <span className="text-[.85rem] font-medium">รวมคาดว่าจะจองได้</span>
+          <b className="num text-xl text-[var(--accent-text)]">{d.weightedPipeline.total} เคส</b>
+        </div>
+      </Card>
+
+      <div className="grid lg:grid-cols-2 gap-5">
+        <Card title="รายเดือนปีนี้ (ยอดสะสม + ยกยอด)">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="text-left text-[11px] text-[var(--text-3)] border-b border-[var(--border)]">
+                <th className="py-2">เดือน</th><th className="py-2 text-right">จองได้</th>
+                <th className="py-2 text-right">เป้า</th><th className="py-2 text-right">ยกยอดสะสม</th>
+              </tr>
+            </thead>
+            <tbody>
+              {d.monthsTable.map((r) => (
+                <tr key={r.month} className={`border-b border-[var(--border)] last:border-0 ${r.month === m.name ? "bg-[var(--accent-soft)]" : ""}`}>
+                  <td className="py-2">{TH_M[r.month - 1]}{r.month === m.name ? " (เดือนนี้)" : ""}</td>
+                  <td className="py-2 text-right num font-medium">{r.actual}</td>
+                  <td className="py-2 text-right num text-[var(--text-2)]">{r.target ?? "—"}</td>
+                  <td className={`py-2 text-right num font-medium ${r.carry === null ? "" : r.carry >= 0 ? "text-[var(--green)]" : "text-[var(--red)]"}`}>
+                    {r.carry === null ? "—" : r.carry > 0 ? `+${r.carry}` : r.carry}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <p className="text-[11px] text-[var(--text-3)]">{d.note}</p>
+        </Card>
+
+        {!isSales && (
+          <Card title="ตั้งเป้า (ผจก.)" desc="เป้าทีมต่อเดือน + เป้ารายเซลส์ (เซลส์จะเห็นเป้าของตัวเองในหน้านี้)">
+            <label className="block max-w-xs">
+              <span className="text-[11px] font-medium text-[var(--text-2)] mb-1 block">เป้าทีม (เคสจอง/เดือน)</span>
+              <input type="number" value={teamTarget} onChange={(e) => setTeamTarget(e.target.value)} className={inputCls} placeholder="เช่น 25" />
+            </label>
+            <div>
+              <span className="text-[11px] font-medium text-[var(--text-2)] mb-2 block">เป้ารายเซลส์ (เคส/เดือน)</span>
+              <div className="grid md:grid-cols-2 gap-x-6 gap-y-2">
+                {users.map((u) => (
+                  <label key={u.userId} className="flex items-center gap-2 text-[.8rem]">
+                    <span className="flex-1 truncate">{u.displayName}</span>
+                    <input type="number" min={0} value={perUser[String(u.userId)] ?? ""}
+                      onChange={(e) => setPerUser((p) => ({ ...p, [String(u.userId)]: e.target.value }))}
+                      className="w-20 px-2 py-1 text-sm bg-white border border-[var(--border-2)] rounded-lg text-right" placeholder="—" />
+                  </label>
+                ))}
+              </div>
+            </div>
+            <button onClick={saveConfig} disabled={saving}
+              className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold bg-[var(--primary)] text-[var(--primary-foreground)] hover:brightness-95 disabled:opacity-50">
+              {saving ? <Loader2 size={14} className="animate-spin" /> : null} บันทึกเป้า
+            </button>
+          </Card>
+        )}
+      </div>
+    </div>
+  );
+}

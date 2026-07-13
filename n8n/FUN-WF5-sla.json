@@ -1,0 +1,29 @@
+{
+  "name": "[FUN] WF5 SLA Engine (hourly)",
+  "nodes": [
+    {
+      "parameters": { "rule": { "interval": [ { "field": "hours" } ] } },
+      "id": "sched-sla",
+      "name": "Every hour",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [240, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://fun-app:3000/api/jobs/sla",
+        "sendHeaders": true,
+        "headerParameters": { "parameters": [ { "name": "x-api-key", "value": "GSdKLs0FuODOSyjeI8UCf9lVKyD3ath" } ] },
+        "options": { "timeout": 120000 }
+      },
+      "id": "call-sla",
+      "name": "POST /api/jobs/sla",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [480, 300]
+    }
+  ],
+  "connections": { "Every hour": { "main": [[{ "node": "POST /api/jobs/sla", "type": "main", "index": 0 }]] } },
+  "settings": { "executionOrder": "v1", "timezone": "Asia/Bangkok" }
+}

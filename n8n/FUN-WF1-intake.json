@@ -1,0 +1,339 @@
+{
+  "name": "[FUN] WF1 Intake",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "GET",
+        "path": "fun-lead-fb",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "wf1-fb-verify",
+      "name": "FB Verify (GET)",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [220, 80],
+      "webhookId": "fun-lead-fb-get"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "typeValidation": "loose" },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.query['hub.verify_token'] }}",
+              "rightValue": "__META_VERIFY_TOKEN__",
+              "operator": { "type": "string", "operation": "equals" }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "wf1-if-verify",
+      "name": "Verify token?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [440, 80]
+    },
+    {
+      "parameters": {
+        "respondWith": "text",
+        "responseBody": "={{ $json.query['hub.challenge'] }}",
+        "options": {}
+      },
+      "id": "wf1-respond-challenge",
+      "name": "Respond Challenge",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [660, 20]
+    },
+    {
+      "parameters": {
+        "respondWith": "text",
+        "responseBody": "forbidden",
+        "options": { "responseCode": 403 }
+      },
+      "id": "wf1-respond-403",
+      "name": "Respond 403",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [660, 160]
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "fun-lead-fb",
+        "responseMode": "onReceived",
+        "options": { "rawBody": true }
+      },
+      "id": "wf1-fb-post",
+      "name": "FB Leadgen (POST)",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [220, 340],
+      "webhookId": "fun-lead-fb-post"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Verify X-Hub-Signature-256 (handoff §7) then extract leadgen ids.\n// Requires n8n env NODE_FUNCTION_ALLOW_BUILTIN=crypto\nconst crypto = require('crypto');\nconst APP_SECRET = '__META_APP_SECRET__';\nconst item = $input.first();\nconst raw = await this.helpers.getBinaryDataBuffer(0, 'data');\nconst sig = String((item.json.headers || {})['x-hub-signature-256'] || '');\nconst expected = 'sha256=' + crypto.createHmac('sha256', APP_SECRET).update(raw).digest('hex');\nlet ok = false;\ntry { ok = sig.length === expected.length && crypto.timingSafeEqual(Buffer.from(sig), Buffer.from(expected)); } catch (e) { ok = false; }\nif (!ok) { throw new Error('Invalid X-Hub-Signature-256 — request dropped'); }\nconst body = JSON.parse(raw.toString('utf8'));\nconst out = [];\nfor (const entry of body.entry || []) {\n  for (const ch of entry.changes || []) {\n    if (ch.field === 'leadgen' && ch.value && ch.value.leadgen_id) {\n      out.push({ json: { leadgenId: String(ch.value.leadgen_id), pageId: String(ch.value.page_id || entry.id || '') } });\n    }\n  }\n}\nreturn out;"
+      },
+      "id": "wf1-verify-extract",
+      "name": "Verify Signature + Extract",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [440, 340]
+    },
+    {
+      "parameters": {
+        "url": "=https://graph.facebook.com/v21.0/{{ $json.leadgenId }}",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            { "name": "access_token", "value": "__FB_SYSTEM_USER_TOKEN__" },
+            { "name": "fields", "value": "field_data,created_time,ad_id,form_id" }
+          ]
+        },
+        "options": {}
+      },
+      "id": "wf1-fetch-lead",
+      "name": "Fetch Lead (Graph API)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [660, 340]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// Flatten Meta field_data into fun_leads columns.\nconst j = $json;\nconst fields = {};\nfor (const f of j.field_data || []) fields[f.name] = String((f.values || [])[0] ?? '').trim();\nconst pick = (...needles) => {\n  for (const n of needles) {\n    const k = Object.keys(fields).find(x => x.toLowerCase().includes(n));\n    if (k && fields[k]) return fields[k];\n  }\n  return null;\n};\nlet phone = pick('phone', 'เบอร์');\nif (phone) phone = phone.replace(/[^0-9+]/g, '').replace(/^\\+66/, '0');\nconst extra = Object.entries(fields).map(([k, v]) => k + ': ' + v).join('\\n');\nreturn { json: {\n  source: 'facebook',\n  leadgenId: j.id || $('Verify Signature + Extract').item.json.leadgenId,\n  pageId: $('Verify Signature + Extract').item.json.pageId,\n  customerName: pick('full_name', 'name', 'ชื่อ'),\n  phone: phone,\n  modelInterest: pick('model', 'รุ่น', 'car'),\n  budgetRange: pick('budget', 'งบ'),\n  rawMessage: extra || null\n} };"
+      },
+      "id": "wf1-flatten",
+      "name": "Flatten Lead",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [880, 340]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT config_id, fb_page_name, brand, branch_code, line_group_id, gsheet_id FROM fun_channel_config WHERE fb_page_id = ? AND active = 1 LIMIT 1",
+        "options": { "queryReplacement": "={{ $json.pageId }}" }
+      },
+      "id": "wf1-lookup-fb",
+      "name": "Lookup Channel (FB)",
+      "type": "n8n-nodes-base.mySql",
+      "typeVersion": 2.4,
+      "position": [1100, 340]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// Merge channel row + lead fields and build the UPSERT (dedupe policy §3:\n// repeat inquiry must NOT fail — reopen instead).\nconst ch = $json;\nconst lead = $('Flatten Lead').item.json;\nconst esc = v => (v === null || v === undefined || v === '') ? 'NULL' : \"'\" + String(v).replace(/\\\\/g, '\\\\\\\\').replace(/'/g, \"''\") + \"'\";\nconst sql = \"INSERT INTO fun_leads (source, fb_leadgen_id, fb_page_id, brand, branch_code, customer_name, phone, model_interest, budget_range, raw_message, status, consent_flag, consent_date, next_followup_date) VALUES (\" + [esc('facebook'), esc(lead.leadgenId), esc(lead.pageId), esc(ch.brand), esc(ch.branch_code), esc(lead.customerName), esc(lead.phone), esc(lead.modelInterest), esc(lead.budgetRange), esc(lead.rawMessage)].join(', ') + \", 'new', 1, NOW(), CURDATE()) ON DUPLICATE KEY UPDATE status='new', next_followup_date=CURDATE(), updated_at=NOW(), fb_leadgen_id=VALUES(fb_leadgen_id), lead_id=LAST_INSERT_ID(lead_id)\";\nreturn { json: { ...lead, brand: ch.brand, branchCode: ch.branch_code, fbPageName: ch.fb_page_name, lineGroupId: ch.line_group_id, gsheetId: ch.gsheet_id, sql: sql } };"
+      },
+      "id": "wf1-assemble-fb",
+      "name": "Assemble FB",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1320, 340]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "={{ $json.sql }}",
+        "options": {}
+      },
+      "id": "wf1-upsert",
+      "name": "Upsert Lead",
+      "type": "n8n-nodes-base.mySql",
+      "typeVersion": 2.4,
+      "position": [1540, 440]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// affectedRows: 1 = new lead, 2 = duplicate key hit → reopen.\nlet base = null;\ntry { base = $('Assemble FB').item.json; } catch (e) { /* walk-in path */ }\nif (!base) { try { base = $('Assemble Walk-in').item.json; } catch (e) { /* ignore */ } }\nif (!base) throw new Error('missing assembled lead data');\nconst okp = $json;\nconst affected = Number(okp.affectedRows ?? 0);\nconst leadId = Number(okp.insertId ?? 0);\nconst reopen = affected >= 2;\nconst BRAND_TH = { mazda: 'Mazda', ford: 'Ford', mitsubishi: 'Mitsubishi', gwm: 'GWM', deepal: 'Deepal', kia: 'Kia' };\nconst srcLabel = ({ facebook: 'Facebook Lead Ad', messenger: 'Messenger', walkin: 'Walk-in form' })[base.source] || base.source;\nconst row = (label, value) => ({ type: 'box', layout: 'baseline', spacing: 'sm', contents: [\n  { type: 'text', text: label, size: 'sm', color: '#8C8C8C', flex: 2 },\n  { type: 'text', text: String(value || '-'), size: 'sm', color: '#222222', flex: 5, wrap: true }\n] });\nconst bubble = { type: 'bubble',\n  header: { type: 'box', layout: 'vertical', backgroundColor: '#06C755', paddingAll: '12px', contents: [\n    { type: 'text', text: reopen ? '🔁 ลูกค้าเดิมทักซ้ำ' : '🚗 ลีดใหม่', weight: 'bold', color: '#FFFFFF', size: 'md' },\n    { type: 'text', text: (BRAND_TH[base.brand] || base.brand) + ' · สาขา ' + base.branchCode, color: '#E8FFE8', size: 'xs' }\n  ] },\n  body: { type: 'box', layout: 'vertical', spacing: 'md', contents: [\n    row('ชื่อ', base.customerName), row('โทร', base.phone), row('รุ่นที่สนใจ', base.modelInterest),\n    row('งบประมาณ', base.budgetRange), row('ที่มา', srcLabel),\n    row('ข้อความ', base.rawMessage ? String(base.rawMessage).slice(0, 200) : '-')\n  ] },\n  footer: { type: 'box', layout: 'vertical', contents: [\n    { type: 'text', text: 'ระบบจะส่งร่างข้อความ follow-up ให้ทุกเช้า 08:30 น. — ห้ามให้ AI ทักลูกค้าเอง เซลล์เป็นคนส่งเสมอ', size: 'xxs', color: '#8C8C8C', wrap: true }\n  ] } };\nconst lineBody = JSON.stringify({ to: base.lineGroupId, messages: [{ type: 'flex', altText: (reopen ? '🔁 ลูกค้าเดิมทักซ้ำ: ' : '🚗 ลีดใหม่: ') + (base.customerName || 'ไม่ระบุชื่อ'), contents: bubble }] });\nconst esc = v => \"'\" + String(v).replace(/\\\\/g, '\\\\\\\\').replace(/'/g, \"''\") + \"'\";\nconst reopenSql = (reopen && leadId) ? ('INSERT INTO fun_lead_activities (lead_id, activity_type, detail) VALUES (' + leadId + \", 'reopen', \" + esc('ลูกค้าเดิมทักซ้ำผ่าน ' + srcLabel) + ')') : '';\nreturn { json: { reopen: !!reopenSql, reopenSql: reopenSql, lineBody: lineBody } };"
+      },
+      "id": "wf1-reopen-flex",
+      "name": "Reopen? + Build Flex",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1760, 440]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "typeValidation": "loose" },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.reopen }}",
+              "rightValue": "",
+              "operator": { "type": "boolean", "operation": "true", "singleValue": true }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "wf1-if-reopen",
+      "name": "IF Reopen",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1980, 440]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "={{ $json.reopenSql }}",
+        "options": {}
+      },
+      "id": "wf1-log-reopen",
+      "name": "Log Reopen Activity",
+      "type": "n8n-nodes-base.mySql",
+      "typeVersion": 2.4,
+      "position": [2200, 360]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.line.me/v2/bot/message/push",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Authorization", "value": "Bearer __LINE_CHANNEL_ACCESS_TOKEN__" },
+            { "name": "Content-Type", "value": "application/json" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.lineBody }}",
+        "options": {}
+      },
+      "id": "wf1-line-push",
+      "name": "LINE Push New Lead",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [2420, 440]
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "fun-lead-web",
+        "responseMode": "onReceived",
+        "options": {}
+      },
+      "id": "wf1-walkin",
+      "name": "Walk-in (POST)",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [220, 700],
+      "webhookId": "fun-lead-web"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://challenges.cloudflare.com/turnstile/v0/siteverify",
+        "sendBody": true,
+        "contentType": "form-urlencoded",
+        "bodyParameters": {
+          "parameters": [
+            { "name": "secret", "value": "__TURNSTILE_SECRET__" },
+            { "name": "response", "value": "={{ $json.body.turnstileToken || $json.body['cf-turnstile-response'] || '' }}" }
+          ]
+        },
+        "options": {}
+      },
+      "id": "wf1-turnstile",
+      "name": "Verify Turnstile",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [440, 700]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "typeValidation": "loose" },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.success }}",
+              "rightValue": "",
+              "operator": { "type": "boolean", "operation": "true", "singleValue": true }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "wf1-if-turnstile",
+      "name": "Turnstile OK?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [660, 700]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// Normalize the walk-in form payload to the same lead shape as FB.\nconst b = $('Walk-in (POST)').item.json.body || {};\nlet phone = String(b.phone || '').replace(/[^0-9+]/g, '').replace(/^\\+66/, '0');\nreturn { json: {\n  source: 'walkin',\n  brand: String(b.brand || '').toLowerCase().trim(),\n  branchCode: String(b.branchCode || b.branch || '').trim(),\n  customerName: String(b.name || '').trim() || null,\n  phone: phone || null,\n  modelInterest: String(b.model || '').trim() || null,\n  budgetRange: String(b.budget || '').trim() || null,\n  rawMessage: String(b.message || '').trim() || null,\n  consent: b.consent ? 1 : 0\n} };"
+      },
+      "id": "wf1-normalize-walkin",
+      "name": "Normalize Walk-in",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [880, 700]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT config_id, fb_page_name, brand, branch_code, line_group_id, gsheet_id FROM fun_channel_config WHERE brand = ? AND branch_code = ? AND active = 1 LIMIT 1",
+        "options": { "queryReplacement": "={{ $json.brand }},{{ $json.branchCode }}" }
+      },
+      "id": "wf1-lookup-walkin",
+      "name": "Lookup Channel (Walk-in)",
+      "type": "n8n-nodes-base.mySql",
+      "typeVersion": 2.4,
+      "position": [1100, 700]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const ch = $json;\nconst lead = $('Normalize Walk-in').item.json;\nconst esc = v => (v === null || v === undefined || v === '') ? 'NULL' : \"'\" + String(v).replace(/\\\\/g, '\\\\\\\\').replace(/'/g, \"''\") + \"'\";\nconst consentFlag = lead.consent ? 1 : 0;\nconst sql = \"INSERT INTO fun_leads (source, fb_leadgen_id, fb_page_id, brand, branch_code, customer_name, phone, model_interest, budget_range, raw_message, status, consent_flag, consent_date, next_followup_date) VALUES ('walkin', NULL, NULL, \" + [esc(ch.brand), esc(ch.branch_code), esc(lead.customerName), esc(lead.phone), esc(lead.modelInterest), esc(lead.budgetRange), esc(lead.rawMessage)].join(', ') + \", 'new', \" + consentFlag + ', ' + (consentFlag ? 'NOW()' : 'NULL') + \", CURDATE()) ON DUPLICATE KEY UPDATE status='new', next_followup_date=CURDATE(), updated_at=NOW(), lead_id=LAST_INSERT_ID(lead_id)\";\nreturn { json: { ...lead, brand: ch.brand, branchCode: ch.branch_code, fbPageName: ch.fb_page_name, lineGroupId: ch.line_group_id, gsheetId: ch.gsheet_id, sql: sql } };"
+      },
+      "id": "wf1-assemble-walkin",
+      "name": "Assemble Walk-in",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1320, 700]
+    }
+  ],
+  "connections": {
+    "FB Verify (GET)": { "main": [[{ "node": "Verify token?", "type": "main", "index": 0 }]] },
+    "Verify token?": {
+      "main": [
+        [{ "node": "Respond Challenge", "type": "main", "index": 0 }],
+        [{ "node": "Respond 403", "type": "main", "index": 0 }]
+      ]
+    },
+    "FB Leadgen (POST)": { "main": [[{ "node": "Verify Signature + Extract", "type": "main", "index": 0 }]] },
+    "Verify Signature + Extract": { "main": [[{ "node": "Fetch Lead (Graph API)", "type": "main", "index": 0 }]] },
+    "Fetch Lead (Graph API)": { "main": [[{ "node": "Flatten Lead", "type": "main", "index": 0 }]] },
+    "Flatten Lead": { "main": [[{ "node": "Lookup Channel (FB)", "type": "main", "index": 0 }]] },
+    "Lookup Channel (FB)": { "main": [[{ "node": "Assemble FB", "type": "main", "index": 0 }]] },
+    "Assemble FB": { "main": [[{ "node": "Upsert Lead", "type": "main", "index": 0 }]] },
+    "Upsert Lead": { "main": [[{ "node": "Reopen? + Build Flex", "type": "main", "index": 0 }]] },
+    "Reopen? + Build Flex": { "main": [[{ "node": "IF Reopen", "type": "main", "index": 0 }]] },
+    "IF Reopen": {
+      "main": [
+        [{ "node": "Log Reopen Activity", "type": "main", "index": 0 }],
+        [{ "node": "LINE Push New Lead", "type": "main", "index": 0 }]
+      ]
+    },
+    "Log Reopen Activity": { "main": [[{ "node": "LINE Push New Lead", "type": "main", "index": 0 }]] },
+    "Walk-in (POST)": { "main": [[{ "node": "Verify Turnstile", "type": "main", "index": 0 }]] },
+    "Verify Turnstile": { "main": [[{ "node": "Turnstile OK?", "type": "main", "index": 0 }]] },
+    "Turnstile OK?": { "main": [[{ "node": "Normalize Walk-in", "type": "main", "index": 0 }], []] },
+    "Normalize Walk-in": { "main": [[{ "node": "Lookup Channel (Walk-in)", "type": "main", "index": 0 }]] },
+    "Lookup Channel (Walk-in)": { "main": [[{ "node": "Assemble Walk-in", "type": "main", "index": 0 }]] },
+    "Assemble Walk-in": { "main": [[{ "node": "Upsert Lead", "type": "main", "index": 0 }]] }
+  },
+  "settings": { "executionOrder": "v1" },
+  "pinData": {}
+}

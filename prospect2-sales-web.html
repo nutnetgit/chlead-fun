@@ -1,0 +1,281 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Prospect 2.0 — เซลส์ (Web App)</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Thai:wght@300;400;500;600&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#F7F6F3; --surface:#FFFFFF; --surface-2:#FBFAF8;
+  --text:#2D2B28; --text-2:#6E6B66; --text-3:#9A968F;
+  --border:#EAE8E3; --border-2:#E0DDD6;
+  --accent:#0F7A66; --accent-soft:#E4F0EC; --accent-text:#0B5A4B;
+  --red:#B7472E; --red-soft:#F6E8E3; --amber:#9C6B15; --amber-soft:#F4ECDA; --green:#2E7D5B;
+  --r-sm:8px; --r:12px; --r-lg:16px;
+  --shadow:0 1px 2px rgba(45,43,40,.03),0 1px 3px rgba(45,43,40,.02);
+  --shadow-h:0 2px 6px rgba(45,43,40,.05),0 1px 3px rgba(45,43,40,.03);
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:"IBM Plex Sans Thai",sans-serif;background:var(--bg);color:var(--text);
+  line-height:1.6;-webkit-font-smoothing:antialiased;letter-spacing:.005em}
+.num{font-variant-numeric:tabular-nums}
+h1,h2,h3{font-weight:600;letter-spacing:-.01em;line-height:1.3}
+.wrap{max-width:74rem;margin:0 auto;padding:0 1.5rem}
+@media(min-width:768px){.wrap{padding:0 2.25rem}}
+
+.topbar{background:rgba(247,246,243,.8);backdrop-filter:blur(10px);
+  border-bottom:.5px solid var(--border);position:sticky;top:0;z-index:20}
+.topbar-in{display:flex;align-items:center;justify-content:space-between;height:60px}
+.brand{display:flex;align-items:center;gap:.7rem}
+.brand-mark{height:30px;width:30px;border-radius:9px;background:var(--accent);display:flex;
+  align-items:center;justify-content:center;color:#fff;font-weight:600;font-size:.95rem}
+.brand b{font-weight:600;font-size:.92rem;display:block}
+.brand .sub{font-size:.72rem;color:var(--text-3)}
+.me{display:flex;align-items:center;gap:.55rem;font-size:.82rem;color:var(--text-2)}
+.me .av{height:30px;width:30px;border-radius:9px;background:var(--accent-soft);color:var(--accent-text);
+  display:flex;align-items:center;justify-content:center;font-size:.76rem;font-weight:500}
+
+.head{padding:2rem 0 1.5rem}
+.eyebrow{font-size:.74rem;color:var(--accent-text);font-weight:500;background:var(--accent-soft);
+  padding:.3rem .7rem;border-radius:9999px;display:inline-flex;align-items:center;gap:.4rem}
+.eyebrow .d{height:5px;width:5px;border-radius:9999px;background:var(--accent)}
+.head h1{font-size:1.7rem;margin:.8rem 0 .3rem}
+.head p{color:var(--text-2);font-size:.95rem}
+
+.mini{display:grid;grid-template-columns:repeat(4,1fr);gap:.75rem;margin-bottom:1.75rem}
+.mcard{background:var(--surface);border:.5px solid var(--border);border-radius:var(--r);
+  padding:.9rem 1rem;box-shadow:var(--shadow)}
+.mcard .l{font-size:.72rem;color:var(--text-2)}
+.mcard .v{font-size:1.5rem;font-weight:600;letter-spacing:-.02em;margin-top:.2rem}
+.mcard .v.accent{color:var(--accent-text)} .mcard .v.red{color:var(--red)}
+
+.layout{display:grid;grid-template-columns:1fr;gap:1.25rem}
+@media(min-width:960px){.layout{grid-template-columns:.9fr 1.1fr}}
+
+.panel{background:var(--surface);border:.5px solid var(--border);border-radius:var(--r-lg);
+  box-shadow:var(--shadow);overflow:hidden}
+.panel-h{padding:1rem 1.3rem;border-bottom:.5px solid var(--border);display:flex;
+  align-items:center;justify-content:space-between}
+.panel-h h3{font-size:1rem}
+.seg{display:flex;gap:.25rem;background:var(--bg);padding:.2rem;border-radius:9999px}
+.seg button{border:none;background:none;font-family:inherit;font-size:.74rem;color:var(--text-2);
+  padding:.28rem .7rem;border-radius:9999px;cursor:pointer;transition:all .18s}
+.seg button.on{background:var(--surface);color:var(--text);font-weight:500;box-shadow:var(--shadow)}
+
+/* lead list */
+.lead{padding:.9rem 1.3rem;display:flex;gap:.8rem;align-items:center;cursor:pointer;
+  border-bottom:.5px solid var(--border);transition:background .18s}
+.lead:last-child{border-bottom:none}
+.lead:hover{background:var(--surface-2)}
+.lead.sel{background:var(--accent-soft)}
+.tp{height:38px;width:38px;border-radius:10px;display:flex;align-items:center;justify-content:center;
+  font-size:.62rem;font-weight:600;flex-shrink:0}
+.tp.hot{background:var(--red-soft);color:var(--red)}
+.tp.warm{background:var(--amber-soft);color:var(--amber)}
+.tp.cold{background:var(--bg);color:var(--text-3)}
+.lead .mid{flex:1;min-width:0}
+.lead .mid .nm{font-weight:500;font-size:.88rem}
+.lead .mid .ca{font-size:.76rem;color:var(--text-2);margin-top:.05rem}
+.lead .end{text-align:right;flex-shrink:0}
+.lead .end .due{font-size:.72rem;font-weight:500}
+.due.over{color:var(--red)} .due.today{color:var(--accent-text)} .due.ok{color:var(--text-3)}
+.lead .end .st{font-size:.68rem;color:var(--text-3);margin-top:.1rem}
+
+/* detail */
+.det-h{padding:1.3rem;border-bottom:.5px solid var(--border)}
+.det-h .row1{display:flex;align-items:center;gap:.6rem}
+.det-h .nm{font-size:1.15rem;font-weight:600}
+.pill{font-size:.66rem;font-weight:600;padding:.18rem .5rem;border-radius:9999px}
+.pill.hot{background:var(--red-soft);color:var(--red)}
+.det-h .ca{color:var(--text-2);font-size:.85rem;margin-top:.25rem}
+.det-grid{display:grid;grid-template-columns:1fr 1fr;gap:.6rem 1rem;padding:1.1rem 1.3rem;
+  border-bottom:.5px solid var(--border)}
+.dg .k{font-size:.7rem;color:var(--text-3)}
+.dg .v{font-size:.86rem;font-weight:500;margin-top:.1rem}
+.dg .v.red{color:var(--red)}
+
+.det-sec{padding:1.1rem 1.3rem;border-bottom:.5px solid var(--border)}
+.det-sec .lbl{font-size:.72rem;color:var(--text-2);font-weight:500;margin-bottom:.7rem;
+  display:flex;align-items:center;justify-content:space-between}
+.tl{position:relative;padding-left:1.1rem}
+.tl::before{content:"";position:absolute;left:3px;top:5px;bottom:5px;width:1.5px;background:var(--border-2)}
+.tl-item{position:relative;padding-bottom:.9rem}
+.tl-item:last-child{padding-bottom:0}
+.tl-item::before{content:"";position:absolute;left:-1.1rem;top:4px;height:8px;width:8px;
+  border-radius:9999px;background:var(--accent);border:1.5px solid var(--surface)}
+.tl-item .d{font-size:.72rem;color:var(--text-3)}
+.tl-item .x{font-size:.82rem;margin-top:.1rem}
+
+.draftbox{background:var(--accent-soft);border-radius:var(--r);padding:.85rem}
+.draftbox .dl{font-size:.7rem;color:var(--accent-text);font-weight:500;margin-bottom:.4rem;
+  display:flex;align-items:center;gap:.35rem}
+.draftbox p{font-size:.84rem;line-height:1.6}
+.draftbox .db{display:flex;gap:.4rem;margin-top:.7rem}
+.draftbox .db button{flex:1;border:none;border-radius:8px;padding:.5rem;font-size:.76rem;
+  font-family:inherit;cursor:pointer;font-weight:500;transition:all .18s}
+.db .cp{background:var(--accent);color:#fff}
+.db .cp:active{background:var(--accent-text)}
+.db .re{background:var(--surface);color:var(--text-2);border:.5px solid var(--border-2)!important}
+
+.actbar{padding:1.1rem 1.3rem;display:flex;gap:.5rem;flex-wrap:wrap}
+.abtn{border:.5px solid var(--border-2);background:var(--surface);color:var(--text);border-radius:9px;
+  padding:.55rem .9rem;font-size:.8rem;font-family:inherit;cursor:pointer;font-weight:400;
+  transition:all .18s}
+.abtn:hover{background:var(--surface-2);border-color:var(--text-3)}
+.abtn.primary{background:var(--accent);color:#fff;border-color:var(--accent);font-weight:500}
+.abtn.primary:hover{background:var(--accent-text);border-color:var(--accent-text)}
+
+.foot{padding:2.5rem 0 2rem;text-align:center;color:var(--text-3);font-size:.78rem}
+.foot .m{font-weight:500;color:var(--text-2)}
+.foot p{margin-top:.35rem;font-size:.76rem}
+.toast{position:fixed;bottom:1.5rem;left:50%;transform:translateX(-50%) translateY(160%);
+  background:var(--text);color:#fff;padding:.8rem 1.3rem;border-radius:11px;font-size:.85rem;z-index:50;
+  transition:transform .3s cubic-bezier(.16,1,.3,1);display:flex;align-items:center;gap:.55rem;
+  box-shadow:0 8px 24px rgba(45,43,40,.15)}
+.toast.show{transform:translateX(-50%) translateY(0)}
+.toast .g{height:6px;width:6px;border-radius:9999px;background:var(--accent)}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <div class="wrap topbar-in">
+    <div class="brand">
+      <div class="brand-mark">P</div>
+      <div><b>Prospect 2.0</b><span class="sub">พื้นที่ทำงานของเซลส์</span></div>
+    </div>
+    <div class="me"><span class="av">ภว</span>ภัทรวดี · Mazda สนญ.</div>
+  </div>
+</div>
+
+<div class="wrap">
+  <div class="head">
+    <span class="eyebrow"><span class="d"></span>ฝั่งเซลส์ · บนเว็บ</span>
+    <h1>ไปป์ไลน์ของฉัน</h1>
+    <p>ดูลูกค้าคาดหวังทั้งหมดที่ดูแลอยู่ เปิดดูประวัติเต็ม และอัปเดตได้ละเอียดกว่าบน LINE</p>
+  </div>
+
+  <div class="mini">
+    <div class="mcard"><div class="l">ดูแลอยู่</div><div class="v num">18</div></div>
+    <div class="mcard"><div class="l">ต้องตามวันนี้</div><div class="v accent num">5</div></div>
+    <div class="mcard"><div class="l">เกินกำหนด</div><div class="v red num">2</div></div>
+    <div class="mcard"><div class="l">ปิดเดือนนี้</div><div class="v num">3</div></div>
+  </div>
+
+  <div class="layout">
+    <div class="panel">
+      <div class="panel-h">
+        <h3>ลูกค้าของฉัน</h3>
+        <div class="seg">
+          <button class="on">ต้องตาม</button>
+          <button>ทั้งหมด</button>
+        </div>
+      </div>
+
+      <div class="lead sel">
+        <div class="tp hot">HOT</div>
+        <div class="mid"><div class="nm">ส่องแสง จำปาแดง</div><div class="ca">Mazda CX-30 · สีแดง</div></div>
+        <div class="end"><div class="due over">ค้าง 53 วัน</div><div class="st">โทรไม่รับ</div></div>
+      </div>
+      <div class="lead">
+        <div class="tp hot">HOT</div>
+        <div class="mid"><div class="nm">ไชยศ น้อมถวาย</div><div class="ca">Mazda CX-5 · สีเทา</div></div>
+        <div class="end"><div class="due over">ค้าง 33 วัน</div><div class="st">รอเสนอราคา</div></div>
+      </div>
+      <div class="lead">
+        <div class="tp warm">WARM</div>
+        <div class="mid"><div class="nm">มานพ เจริญสุข</div><div class="ca">Mazda 2 · สีขาว</div></div>
+        <div class="end"><div class="due today">นัดวันนี้ 14:00</div><div class="st">ทดลองขับ</div></div>
+      </div>
+      <div class="lead">
+        <div class="tp warm">WARM</div>
+        <div class="mid"><div class="nm">สุดา รักดี</div><div class="ca">Mazda CX-30 · สีน้ำเงิน</div></div>
+        <div class="end"><div class="due ok">ตาม 8 ก.ค.</div><div class="st">เช็คไฟแนนซ์</div></div>
+      </div>
+      <div class="lead">
+        <div class="tp cold">COLD</div>
+        <div class="mid"><div class="nm">ประสิทธิ์ ทองมา</div><div class="ca">Mazda 3 · ยังไม่เลือกสี</div></div>
+        <div class="end"><div class="due ok">ตาม 15 ก.ค.</div><div class="st">ขอคิดดูก่อน</div></div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="det-h">
+        <div class="row1"><span class="nm">คุณส่องแสง จำปาแดง</span><span class="pill hot">HOT</span></div>
+        <div class="ca">Mazda CX-30 2.0 SP · สีแดง · สนใจซื้อสด</div>
+      </div>
+
+      <div class="det-grid">
+        <div class="dg"><div class="k">ค้างติดต่อ</div><div class="v red num">53 วัน</div></div>
+        <div class="dg"><div class="k">ช่องทางที่มา</div><div class="v">Walk-in โชว์รูม</div></div>
+        <div class="dg"><div class="k">งบที่แจ้ง</div><div class="v num">~1,100,000</div></div>
+        <div class="dg"><div class="k">รถในสต็อก</div><div class="v">มี 1 คัน</div></div>
+        <div class="dg"><div class="k">กรอบเวลา</div><div class="v">ภายใน 1 เดือน</div></div>
+        <div class="dg"><div class="k">รถเทิร์น</div><div class="v">ไม่มี</div></div>
+      </div>
+
+      <div class="det-sec">
+        <div class="lbl">ประวัติการติดตาม</div>
+        <div class="tl">
+          <div class="tl-item"><div class="d">13 พ.ค. · 11:31</div><div class="x">โทรติดตาม — ไม่รับสาย นัดโทรใหม่ 16 พ.ค.</div></div>
+          <div class="tl-item"><div class="d">8 พ.ค. · 15:20</div><div class="x">เข้าโชว์รูม ดูรถจริง สนใจสีแดง ขอกลับไปคิด</div></div>
+          <div class="tl-item"><div class="d">8 พ.ค. · 15:00</div><div class="x">Walk-in ครั้งแรก · ภัทรวดีรับเรื่อง</div></div>
+        </div>
+      </div>
+
+      <div class="det-sec">
+        <div class="lbl">✎ ข้อความที่ AI ร่างให้ส่งวันนี้</div>
+        <div class="draftbox">
+          <div class="dl">ปรับให้เข้ากับลูกค้ารายนี้แล้ว</div>
+          <p>สวัสดีค่ะคุณส่องแสง ภัทรวดีจาก Mazda นะคะ 😊 ตอนนี้ CX-30 สีแดงที่คุณสนใจมีพร้อมส่งมอบ และเดือนนี้มีโปรดาวน์เริ่มต้นพิเศษค่ะ สะดวกให้โทรคุยรายละเอียดช่วงไหนดีคะ?</p>
+          <div class="db">
+            <button class="cp" onclick="toast('คัดลอกแล้ว · เปิด LINE ลูกค้าได้เลย')">คัดลอก แล้วส่งเอง</button>
+            <button class="re" onclick="toast('กำลังให้ AI ร่างใหม่…')">ร่างใหม่</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="actbar">
+        <button class="abtn primary" onclick="toast('บันทึก: ติดต่อแล้ว · อัปเดตวันตามถัดไป')">บันทึกการติดต่อ</button>
+        <button class="abtn" onclick="toast('เปิดฟอร์มนัดหมาย')">นัดหมาย</button>
+        <button class="abtn" onclick="toast('เปิดฟอร์มเสนอราคา')">เสนอราคา</button>
+        <button class="abtn" onclick="toast('เปิดสรุปข้อมูลจอง ส่งต่อการเงิน')">ลูกค้าจอง</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="foot">
+    <div class="m">Prospect 2.0 · พื้นที่ทำงานของเซลส์ · ตัวอย่างดีไซน์</div>
+    <p>ข้อมูลชุดเดียวกับ LINE และ Dashboard ผู้จัดการ · อัปเดตที่ไหนก็เห็นตรงกันทุกที่</p>
+  </div>
+</div>
+
+<div class="toast" id="toast"><span class="g"></span><span id="toast-msg"></span></div>
+
+<script>
+let tt;
+function toast(m){
+  const t=document.getElementById('toast');
+  document.getElementById('toast-msg').textContent=m;
+  t.classList.add('show');clearTimeout(tt);
+  tt=setTimeout(()=>t.classList.remove('show'),2600);
+}
+document.querySelectorAll('.lead').forEach(l=>{
+  l.addEventListener('click',()=>{
+    document.querySelectorAll('.lead').forEach(x=>x.classList.remove('sel'));
+    l.classList.add('sel');
+  });
+});
+document.querySelectorAll('.seg button').forEach(b=>{
+  b.addEventListener('click',()=>{
+    document.querySelectorAll('.seg button').forEach(x=>x.classList.remove('on'));
+    b.classList.add('on');
+  });
+});
+</script>
+</body>
+</html>

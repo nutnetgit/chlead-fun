@@ -1,0 +1,113 @@
+@import "tailwindcss";
+
+/* Ch.Lead FUN design language v2 (user-approved 2026-07-08, supersedes the
+   teal of ADR-007): cream ground, white 16px cards, warm gold accent —
+   matches the approved kanban mockup + the Ch.Erawan Group gold badge.
+   Legacy var names kept so every existing component restyles automatically. */
+:root {
+  --bg: #EFEDE7;
+  --panel: #FBFAF8;
+  --surface: #FFFFFF;
+  --surface-2: #F7F5F0;
+  --text: #22201B;
+  --text-2: #6E6A60;
+  --text-3: #9B968A;
+  --accent-gold: #F3B01C;
+  --accent-soft: #FCF3DC;
+  --accent-text: #B57F06;
+  --red: #C24E33;
+  --red-soft: #F8E8E2;
+  --amber: #A16E12;
+  --amber-soft: #F6EDD6;
+  --green: #3E8E63;
+  --green-soft: #E3F0E8;
+
+  /* legacy names used across components — remapped to the gold palette */
+  --background: var(--bg);
+  --foreground: var(--text);
+  --card: var(--surface);
+  --card-foreground: var(--text);
+  --muted: #E7E3D9;
+  --muted-foreground: var(--text-2);
+  --border: #ECE8DF;
+  --border-2: #E0DBD0;
+  --primary: var(--accent-gold);
+  --primary-foreground: #3A2C05;
+  --accent: var(--accent-soft);
+  --radius: 14px;
+  --shadow: 0 1px 2px rgba(34,32,27,.04), 0 4px 14px rgba(34,32,27,.05);
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-border: var(--border);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-accent: var(--accent);
+  --radius: var(--radius);
+}
+
+/* Dark theme (toggle top-right stamps data-theme on <html>). Gold accent
+   stays; grounds/inks invert with warm bias. `.bg-white` literals across
+   components are remapped so the whole app follows without per-file edits. */
+:root[data-theme="dark"] {
+  --bg: #171512;
+  --panel: #1E1B17;
+  --surface: #26221C;
+  --surface-2: #2C2822;
+  --text: #EDE9E0;
+  --text-2: #B8B2A6;
+  --text-3: #8A857B;
+  --accent-soft: #3A3220;
+  --accent-text: #E8B84B;
+  --red: #E0714F;
+  --red-soft: #3D2620;
+  --amber: #DBA843;
+  --amber-soft: #3A3220;
+  --green: #5FB88A;
+  --green-soft: #22352B;
+  --muted: #332F27;
+  --border: #37322A;
+  --border-2: #443E34;
+  --shadow: 0 1px 2px rgba(0,0,0,.2), 0 4px 14px rgba(0,0,0,.25);
+}
+:root[data-theme="dark"] .bg-white { background-color: var(--surface) !important; }
+:root[data-theme="dark"] .bg-black\/30 { background-color: rgba(0,0,0,.55) !important; }
+
+* {
+  border-color: var(--border);
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  line-height: 1.55;
+  -webkit-font-smoothing: antialiased;
+  letter-spacing: 0.004em;
+}
+
+h1, h2, h3 {
+  font-weight: 600;
+  letter-spacing: -0.014em;
+  line-height: 1.3;
+}
+
+.num { font-variant-numeric: tabular-nums; }
+
+/* Slide-over panels (contact detail, etc.) — no tailwindcss-animate plugin
+   here, so these are hand-rolled to match the CATS-style right-side slide. */
+@keyframes slide-in-from-right {
+  from { transform: translateX(100%); }
+  to { transform: translateX(0); }
+}
+@keyframes fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+.slide-panel-right { animation: slide-in-from-right 0.2s ease-out; }
+.fade-in-backdrop { animation: fade-in 0.2s ease-out; }

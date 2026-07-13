@@ -1,0 +1,45 @@
+{
+  "name": "[FUN] LINE Group-ID Capture",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "fun-line-events",
+        "responseMode": "onReceived",
+        "options": {}
+      },
+      "id": "line-webhook",
+      "name": "LINE Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [240, 300],
+      "webhookId": "fun-line-events"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://fun-app:3000/api/webhooks/line",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Content-Type", "value": "application/json" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.body || {}) }}",
+        "options": {}
+      },
+      "id": "forward-app",
+      "name": "Forward to FUN app",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [480, 300]
+    }
+  ],
+  "connections": {
+    "LINE Webhook": { "main": [[{ "node": "Forward to FUN app", "type": "main", "index": 0 }]] }
+  },
+  "settings": { "executionOrder": "v1" },
+  "pinData": {}
+}

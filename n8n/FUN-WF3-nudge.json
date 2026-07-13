@@ -1,0 +1,29 @@
+{
+  "name": "[FUN] WF3 Nudge (08:30)",
+  "nodes": [
+    {
+      "parameters": { "rule": { "interval": [ { "field": "cronExpression", "expression": "30 8 * * *" } ] } },
+      "id": "sched-nudge",
+      "name": "Every day 08:30",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [240, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://fun-app:3000/api/jobs/nudge",
+        "sendHeaders": true,
+        "headerParameters": { "parameters": [ { "name": "x-api-key", "value": "GSdKLs0FuODOSyjeI8UCf9lVKyD3ath" } ] },
+        "options": { "timeout": 120000 }
+      },
+      "id": "call-nudge",
+      "name": "POST /api/jobs/nudge",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [480, 300]
+    }
+  ],
+  "connections": { "Every day 08:30": { "main": [[{ "node": "POST /api/jobs/nudge", "type": "main", "index": 0 }]] } },
+  "settings": { "executionOrder": "v1", "timezone": "Asia/Bangkok" }
+}
