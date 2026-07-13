@@ -115,15 +115,14 @@ const L = {
   disclaimerNote: "หมายเหตุ (Note):",
 };
 
-// App's own warm brown/gold identity (user req 2026-07-13, switched from
-// navy): dark-brown section bars + light-brown/cream soft fills — same
-// family as globals.css (--accent-text #B57F06 / --accent-soft #FCF3DC),
-// darkened for white-on-accent print contrast.
-const ACCENT = "#6e5010";
-const ACCENT_SOFT = "#f6efde";
-const INK = "#22201b";
-const MUTED = "#6e6a60";
-const LINE = "#e3dccb";
+// Neutral gray tone (user req 2026-07-13, third revision: teal → navy →
+// brown → final gray): dark-gray section bars + light-gray soft fills —
+// prints cleanly on any B/W or color printer, no brand-color dependency.
+const ACCENT = "#4a4f55";
+const ACCENT_SOFT = "#f0f1f3";
+const INK = "#1f2226";
+const MUTED = "#6b7076";
+const LINE = "#dcdfe3";
 const GREEN = "#1c7a4a";
 const AMBER = "#a05c14";
 const DUE = "#b23b2e";

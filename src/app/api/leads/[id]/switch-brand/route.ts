@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { requireLeadAccess } from "@/lib/authz";
 import { linePush } from "@/lib/flex";
 
 export const runtime = "nodejs";
@@ -24,6 +25,8 @@ type Ctx = { params: Promise<{ id: string }> };
 export async function POST(request: NextRequest, { params }: Ctx) {
   const { id } = await params;
   const leadId = BigInt(id || "0");
+  const access = await requireLeadAccess(leadId);
+  if (!access.ok) return access.response;
   const b = (await request.json().catch(() => ({}))) as Record<string, unknown>;
   const brandId = Number(b.brandId);
   const branchId = Number(b.branchId);

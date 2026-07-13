@@ -31,6 +31,7 @@ import { Card, Toggle, inputCls } from "@/components/ui";
 type Row = {
   brandId: number; brandName: string;
   messagingConfigured: boolean; isActive: boolean; destination: string | null; accessTokenTail: string | null;
+  quotaLimit: number | null; quotaUsed: number | null;
   liffId: string | null;
 };
 type Draft = { channelAccessToken: string; channelSecret: string };
@@ -109,6 +110,17 @@ export default function LineOaSettingsPage() {
                         )}
                       </div>
                     </div>
+                    {r.messagingConfigured && r.quotaUsed !== null && (
+                      // Monthly push-message usage (LINE quota API). Free-plan
+                      // cap turns amber past 80% so an admin sees it coming.
+                      <span className={`text-[.7rem] font-medium px-2 py-0.5 rounded-full num shrink-0 ${
+                        r.quotaLimit !== null && r.quotaUsed / r.quotaLimit >= 0.8
+                          ? "bg-[var(--amber-soft)] text-[var(--amber)]"
+                          : "bg-[var(--surface-2)] text-[var(--text-2)]"}`}
+                        title="ข้อความ push ที่ใช้ไปเดือนนี้ / โควต้าแผน">
+                        {r.quotaUsed.toLocaleString()}{r.quotaLimit !== null ? ` / ${r.quotaLimit.toLocaleString()}` : ""} ข้อความ
+                      </span>
+                    )}
                     {r.messagingConfigured && <Toggle on={r.isActive} onClick={() => toggleActive(r)} />}
                     <button onClick={() => startEdit(r)} className="p-1.5 rounded hover:bg-[var(--accent-soft)]" title={r.messagingConfigured ? "แก้ไข" : "ตั้งค่า"}>
                       <Pencil size={14} />

@@ -91,6 +91,14 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "missing customerName/brandId/branchId/channelId" }, { status: 400 });
   }
 
+  // 2026-07-13 permission audit: this route had no role check, and the body's
+  // ownerUserId was trusted as-is — a sales user could file leads under any
+  // colleague's name. Sales now always own what they create; manager+ keep
+  // the owner picker.
+  const rq = await requireRole(["sales", "manager", "gm", "admin"]);
+  if (!rq.ok) return rq.response;
+  if (rq.role === "sales") b.ownerUserId = rq.funUserId ?? undefined;
+
   const channel = await prisma.sourceChannel.findUnique({ where: { channelId } });
   if (!channel) return NextResponse.json({ error: "ช่องทางไม่ถูกต้อง" }, { status: 400 });
 

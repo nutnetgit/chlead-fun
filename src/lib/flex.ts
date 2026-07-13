@@ -263,6 +263,9 @@ export function buildOwnerConsentBubble(opts: {
 // as an attachment (not inline) so LINE's in-app browser downloads it to
 // the device's own PDF viewer instead of trying (and failing) to render it
 // inline.
+// Restyled 2026-07-13 (user req): light-yellow header + soft-orange button —
+// was teal-green; and NO net total on the card. Price talk stays inside the
+// PDF/negotiation; the card is just the door.
 export function buildQuotePdfBubble(opts: {
   quoteNo: string;
   customerName: string;
@@ -270,7 +273,6 @@ export function buildQuotePdfBubble(opts: {
   createdAt: Date | null;
   variant?: string | null;
   color?: string | null;
-  totalPrice?: number | null;
   pdfUrl: string;
 }): { altText: string; contents: Record<string, unknown> } {
   const dateLabel = opts.createdAt
@@ -289,24 +291,20 @@ export function buildQuotePdfBubble(opts: {
   rows.push(row("ผู้เสนอ", opts.companyName));
   if (dateLabel) rows.push(row("วันที่ออกเอกสาร", dateLabel));
   rows.push(row("เลขที่เอกสาร", opts.quoteNo));
-  if (opts.totalPrice) {
-    rows.push({ type: "separator", margin: "sm" });
-    rows.push({ type: "text", text: `ยอดสุทธิ ${opts.totalPrice.toLocaleString()} บาท`, size: "md", weight: "bold", color: "#0e6e66", margin: "sm" });
-  }
 
   const contents = {
     type: "bubble",
     header: {
-      type: "box", layout: "vertical", backgroundColor: "#0e6e66", paddingAll: "14px",
+      type: "box", layout: "vertical", backgroundColor: "#FDF3D8", paddingAll: "14px",
       contents: [
-        { type: "text", text: "รายละเอียดข้อเสนอซื้อรถของคุณ", weight: "bold", color: "#FFFFFF", size: "md", wrap: true },
+        { type: "text", text: "รายละเอียดข้อเสนอซื้อรถของคุณ", weight: "bold", color: "#8A5A00", size: "md", wrap: true },
       ],
     },
     body: { type: "box", layout: "vertical", spacing: "sm", contents: rows },
     footer: {
       type: "box", layout: "vertical",
       contents: [
-        { type: "button", style: "primary", height: "sm", color: "#0e6e66",
+        { type: "button", style: "primary", height: "sm", color: "#F2A65A",
           action: { type: "uri", label: "ดูรายละเอียดฉบับเต็ม", uri: opts.pdfUrl } },
       ],
     },

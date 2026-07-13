@@ -9,7 +9,7 @@ import { Loader2, X } from "lucide-react";
 type BrandRow = { brandId: number; brandName: string };
 type BranchRow = { branchId: number; branchName: string; brandId: number | null; isActive: boolean };
 type ModelRow = { modelId: number; modelName: string; colors: { colorId: number; colorName: string }[] };
-type UserRow = { userId: number; displayName: string; role: string };
+type UserRow = { userId: number; displayName: string; role: string; branchId: number | null; branchIds: number[] };
 type SourceRow = { channelId: number; channelName: string; category: string; isActive: boolean };
 
 const inputCls = "w-full px-3 py-2 text-sm bg-white border border-[var(--border-2)] rounded-lg focus:outline-none focus:ring-1 focus:ring-[var(--primary)]";
@@ -37,15 +37,40 @@ export function AddLeadModal({ onClose, onCreated }: { onClose: () => void; onCr
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const [me, setMe] = useState<{ role: string; funUserId: number } | null>(null);
+
   useEffect(() => {
     fetch("/api/branches").then((r) => r.json()).then((d) => { setBrands(d.brands); setBranches(d.branches); });
     fetch("/api/users").then((r) => r.json()).then(setUsers);
+    fetch("/api/me").then((r) => r.json()).then((d) => { if (d.user) setMe({ role: d.user.role, funUserId: d.user.funUserId }); });
     fetch("/api/sources").then((r) => r.json()).then((rows: SourceRow[]) => {
       setSources(rows);
       const firstActive = rows.find((s) => s.isActive && SHOWROOM_CATEGORIES.includes(s.category));
       if (firstActive) setF((prev) => ({ ...prev, channelId: String(firstActive.channelId) }));
     });
   }, []);
+
+  // Per-branch separation for sales (2026-07-13 permission audit — this
+  // modal showed every brand/branch to everyone): a sales user only files
+  // leads under their own branches/brands, mirroring QrLeadModal's scoping.
+  // No branch links at all → graceful fallback to everything, same as the QR
+  // modal. Manager+ keep the full list.
+  const isSales = me?.role === "sales";
+  const myBranchIdSet = useMemo(() => {
+    if (!isSales) return null;
+    const self = users.find((u) => u.userId === me?.funUserId);
+    const ids = new Set([...(self?.branchIds ?? []), ...(self?.branchId ? [self.branchId] : [])]);
+    return ids.size ? ids : null;
+  }, [isSales, users, me]);
+  const visibleBranches = useMemo(
+    () => branches.filter((b) => b.isActive && (!myBranchIdSet || myBranchIdSet.has(b.branchId))),
+    [branches, myBranchIdSet],
+  );
+  const visibleBrands = useMemo(() => {
+    if (!myBranchIdSet) return brands;
+    const brandIds = new Set(visibleBranches.map((b) => b.brandId).filter((x): x is number => x !== null));
+    return brands.filter((b) => brandIds.has(b.brandId));
+  }, [brands, visibleBranches, myBranchIdSet]);
 
   const showroomSources = sources.filter((s) => s.isActive && SHOWROOM_CATEGORIES.includes(s.category));
   const onlineSources = sources.filter((s) => s.isActive && ONLINE_CATEGORIES.includes(s.category));
@@ -56,8 +81,8 @@ export function AddLeadModal({ onClose, onCreated }: { onClose: () => void; onCr
   }, [f.brandId]);
 
   const brandBranches = useMemo(
-    () => branches.filter((b) => b.isActive && (!f.brandId || b.brandId === Number(f.brandId) || b.brandId === null)),
-    [branches, f.brandId],
+    () => visibleBranches.filter((b) => !f.brandId || b.brandId === Number(f.brandId) || b.brandId === null),
+    [visibleBranches, f.brandId],
   );
   const selectedModel = models.find((m) => m.modelId === Number(f.modelId));
 
@@ -102,7 +127,7 @@ export function AddLeadModal({ onClose, onCreated }: { onClose: () => void; onCr
             <span className="text-[.72rem] text-[var(--text-2)] block mb-1">แบรนด์ *</span>
             <select value={f.brandId} onChange={(e) => setF({ ...f, brandId: e.target.value, branchId: "", modelId: "", colorName: "" })} className={inputCls}>
               <option value="">— เลือก —</option>
-              {brands.map((b) => <option key={b.brandId} value={b.brandId}>{b.brandName}</option>)}
+              {visibleBrands.map((b) => <option key={b.brandId} value={b.brandId}>{b.brandName}</option>)}
             </select>
           </label>
           <label className="block">
@@ -149,10 +174,16 @@ export function AddLeadModal({ onClose, onCreated }: { onClose: () => void; onCr
           </label>
           <label className="block">
             <span className="text-[.72rem] text-[var(--text-2)] block mb-1">เซลส์ผู้ดูแล</span>
-            <select value={f.ownerUserId} onChange={(e) => setF({ ...f, ownerUserId: e.target.value })} className={inputCls}>
-              <option value="">— ยังไม่มอบหมาย —</option>
-              {users.filter((u) => u.role === "sales" || u.role === "manager").map((u) => <option key={u.userId} value={u.userId}>{u.displayName}</option>)}
-            </select>
+            {isSales ? (
+              // Sales always own what they create (server enforces the same) —
+              // no picking colleagues.
+              <input disabled value={users.find((u) => u.userId === me?.funUserId)?.displayName ?? "ตัวเอง"} className={inputCls + " opacity-70"} />
+            ) : (
+              <select value={f.ownerUserId} onChange={(e) => setF({ ...f, ownerUserId: e.target.value })} className={inputCls}>
+                <option value="">— ยังไม่มอบหมาย —</option>
+                {users.filter((u) => u.role === "sales" || u.role === "manager").map((u) => <option key={u.userId} value={u.userId}>{u.displayName}</option>)}
+              </select>
+            )}
           </label>
           <label className="block col-span-2 md:col-span-1">
             <span className="text-[.72rem] text-[var(--text-2)] block mb-1">งบประมาณ (ข้อความ)</span>

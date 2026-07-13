@@ -48,7 +48,7 @@ export async function POST(_request: NextRequest, { params }: Ctx) {
   const companyName = lead.branch.companyNameFull || "บริษัทในเครือ ช.เอราวัณ กรุ๊ป";
   const { altText, contents } = buildQuotePdfBubble({
     quoteNo, customerName, companyName, createdAt: quote.createdAt,
-    variant: quote.variant, color: quote.color, totalPrice, pdfUrl,
+    variant: quote.variant, color: quote.color, pdfUrl,
   });
   const push = await linePushFlex(creds.accessToken, ident.idValue, altText, contents);
   if (!push.ok) return NextResponse.json({ error: "ส่งไม่สำเร็จ" }, { status: 502 });

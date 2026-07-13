@@ -1,13 +1,18 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { requireRole } from "@/lib/authz";
 
 // Month view data: per-day counts of leads due (next_action_at) and
 // appointments — feeds the calendar overlay. ?month=YYYY-MM (default: now),
-// ?owner= narrows to a salesperson.
+// ?owner= narrows to a salesperson (sales are always pinned to themselves —
+// 2026-07-13 permission audit).
 export async function GET(request: NextRequest) {
+  const rq = await requireRole(["sales", "manager", "gm", "admin"]);
+  if (!rq.ok) return rq.response;
+
   const p = request.nextUrl.searchParams;
   const monthStr = p.get("month");
-  const owner = p.get("owner");
+  const owner = rq.role === "sales" ? String(rq.funUserId) : p.get("owner");
   const base = monthStr ? new Date(`${monthStr}-01T00:00:00`) : new Date();
   const start = new Date(base.getFullYear(), base.getMonth(), 1);
   const end = new Date(base.getFullYear(), base.getMonth() + 1, 1);

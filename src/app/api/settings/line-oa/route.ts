@@ -14,6 +14,27 @@ const BRAND_ORDER = ["Mazda", "Ford", "Mitsubishi", "GWM", "Deepal", "KIA", "GAC
  * perspective: this list only ever returns whether a brand is configured
  * and a masked tail of the access token, never the raw secret.
  */
+// Monthly push-quota usage per OA (user req 2026-07-13 — "which sends eat
+// quota and how close are we"): LINE's quota endpoints, called with each
+// brand's own token. Push messages count against the plan's monthly cap;
+// webhook inbound + replies via OA Manager's chat screen are free.
+async function fetchQuota(token: string): Promise<{ limit: number | null; used: number | null }> {
+  try {
+    const [quotaRes, usedRes] = await Promise.all([
+      fetch("https://api.line.me/v2/bot/message/quota", { headers: { Authorization: `Bearer ${token}` } }),
+      fetch("https://api.line.me/v2/bot/message/quota/consumption", { headers: { Authorization: `Bearer ${token}` } }),
+    ]);
+    const quota = quotaRes.ok ? await quotaRes.json() : null;
+    const used = usedRes.ok ? await usedRes.json() : null;
+    return {
+      limit: quota?.type === "limited" ? quota.value : null, // null = unlimited plan
+      used: typeof used?.totalUsage === "number" ? used.totalUsage : null,
+    };
+  } catch {
+    return { limit: null, used: null };
+  }
+}
+
 export async function GET() {
   const rq = await requireRole(["admin", "gm"]);
   if (!rq.ok) return rq.response;
@@ -30,8 +51,11 @@ export async function GET() {
     return ia - ib;
   });
 
-  return NextResponse.json(
-    brands.map((b) => ({
+  const rows = await Promise.all(brands.map(async (b) => {
+    const quota = b.lineConfig?.channelAccessToken
+      ? await fetchQuota(b.lineConfig.channelAccessToken)
+      : { limit: null, used: null };
+    return {
       brandId: b.brandId,
       brandName: b.brandName,
       messagingConfigured: !!(b.lineConfig?.channelAccessToken && b.lineConfig?.channelSecret),
@@ -40,6 +64,10 @@ export async function GET() {
       accessTokenTail: b.lineConfig?.channelAccessToken ? b.lineConfig.channelAccessToken.slice(-4) : null,
       liffId: b.lineConfig?.liffId ?? null,
       updatedAt: b.lineConfig?.updatedAt ?? null,
-    })),
-  );
+      quotaLimit: quota.limit,
+      quotaUsed: quota.used,
+    };
+  }));
+
+  return NextResponse.json(rows);
 }

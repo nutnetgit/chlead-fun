@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { requireRole } from "@/lib/authz";
+import { requireRole, requireLeadAccess } from "@/lib/authz";
 
 type Ctx = { params: Promise<{ id: string }> };
 
@@ -11,6 +11,8 @@ const DAY = 24 * 60 * 60 * 1000;
 export async function GET(_request: NextRequest, { params }: Ctx) {
   const { id } = await params;
   const leadId = BigInt(id || "0");
+  const access = await requireLeadAccess(leadId);
+  if (!access.ok) return access.response;
   const lead = await prisma.lead.findUnique({
     where: { leadId },
     include: {
@@ -88,10 +90,11 @@ export async function GET(_request: NextRequest, { params }: Ctx) {
 export async function PATCH(request: NextRequest, { params }: Ctx) {
   const { id } = await params;
   const leadId = BigInt(id || "0");
+  const access = await requireLeadAccess(leadId);
+  if (!access.ok) return access.response;
   const body = (await request.json().catch(() => ({}))) as { stage?: string; temperature?: string; archived?: boolean; changedBy?: number };
 
-  const lead = await prisma.lead.findUnique({ where: { leadId } });
-  if (!lead) return NextResponse.json({ error: "not found" }, { status: 404 });
+  const lead = access.lead;
 
   const VALID_STAGES = new Set(["new", "contacted", "qualified", "appointment", "test_drive", "negotiation", "finance_check", "booking", "nurture", "lost"]);
   const VALID_TEMPS = new Set(["hot", "warm", "cold"]);

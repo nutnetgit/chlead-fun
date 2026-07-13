@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { requireLeadAccess } from "@/lib/authz";
 import { callGeminiJson, parseModelJson, geminiReady } from "@/lib/gemini";
 
 export const runtime = "nodejs";
@@ -15,6 +16,8 @@ type Ctx = { params: Promise<{ id: string }> };
 export async function POST(_request: NextRequest, { params }: Ctx) {
   const { id } = await params;
   const leadId = BigInt(id || "0");
+  const access = await requireLeadAccess(leadId);
+  if (!access.ok) return access.response;
   const lead = await prisma.lead.findUnique({
     where: { leadId },
     include: {

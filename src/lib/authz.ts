@@ -39,6 +39,29 @@ export async function requireRole(allowed: string[]): Promise<RoleCheck> {
 }
 
 /**
+ * Lead-scoped access gate (2026-07-13 permission audit: the lead LIST was
+ * owner-scoped for sales, but the per-lead detail/mutation routes — GET/PATCH
+ * /api/leads/[id], activity, summarize, switch-brand — had no check at all,
+ * so any signed-in sales could read or modify any other salesperson's lead
+ * across every brand/branch just by iterating ids). Same rule the chat/quote
+ * routes already used: sales only their own leads; manager+ any lead.
+ */
+type LeadAccess =
+  | { ok: true; funUserId: number | null; role: string | null; lead: NonNullable<Awaited<ReturnType<typeof prisma.lead.findUnique>>> }
+  | { ok: false; response: NextResponse };
+
+export async function requireLeadAccess(leadId: bigint): Promise<LeadAccess> {
+  const rq = await requireRole(["sales", "manager", "gm", "admin"]);
+  if (!rq.ok) return { ok: false, response: rq.response };
+  const lead = await prisma.lead.findUnique({ where: { leadId } });
+  if (!lead) return { ok: false, response: NextResponse.json({ error: "ไม่พบ Lead" }, { status: 404 }) };
+  if (rq.role === "sales" && lead.ownerUserId !== rq.funUserId) {
+    return { ok: false, response: NextResponse.json({ error: "Forbidden" }, { status: 403 }) };
+  }
+  return { ok: true, funUserId: rq.funUserId, role: rq.role, lead };
+}
+
+/**
  * Manager settings split (user req 2026-07-12): a manager can manage vehicle
  * models/colors, but only for brands they actually have branch access to
  * (via fun_user_branch → fun_branch.brand_id) — mirrors how a manager's

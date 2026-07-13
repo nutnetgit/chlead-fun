@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { requireLeadAccess } from "@/lib/authz";
 
 type Ctx = { params: Promise<{ id: string }> };
 
@@ -21,8 +22,9 @@ const VALID_OUTCOMES = new Set([
 export async function POST(request: NextRequest, { params }: Ctx) {
   const { id } = await params;
   const leadId = BigInt(id || "0");
-  const lead = await prisma.lead.findUnique({ where: { leadId } });
-  if (!lead) return NextResponse.json({ error: "not found" }, { status: 404 });
+  const access = await requireLeadAccess(leadId);
+  if (!access.ok) return access.response;
+  const lead = access.lead;
 
   const b = (await request.json().catch(() => ({}))) as {
     activityType?: string; outcome?: string; summary?: string; detail?: string;
@@ -31,6 +33,9 @@ export async function POST(request: NextRequest, { params }: Ctx) {
   if (!b.activityType || !VALID_TYPES.has(b.activityType)) {
     return NextResponse.json({ error: "invalid activityType" }, { status: 400 });
   }
+  // Attribution comes from the session, not the client body — a stray/forged
+  // createdBy can't pin an activity on someone else.
+  const createdBy = access.funUserId ?? b.createdBy ?? null;
 
   const activity = await prisma.activity.create({
     data: {
@@ -41,7 +46,7 @@ export async function POST(request: NextRequest, { params }: Ctx) {
       summary: b.summary?.slice(0, 255) || null,
       detail: b.detail || null,
       nextActionAt: b.nextActionAt ? new Date(b.nextActionAt) : null,
-      createdBy: b.createdBy ?? null,
+      createdBy,
     },
   });
 
@@ -49,7 +54,7 @@ export async function POST(request: NextRequest, { params }: Ctx) {
   if (lead.stage === "new") {
     await prisma.lead.update({ where: { leadId }, data: { stage: "contacted" } });
     await prisma.leadStageHistory.create({
-      data: { leadId, fromStage: "new", toStage: "contacted", changedBy: b.createdBy ?? null, note: "auto: first logged contact" },
+      data: { leadId, fromStage: "new", toStage: "contacted", changedBy: createdBy, note: "auto: first logged contact" },
     });
   }
 
