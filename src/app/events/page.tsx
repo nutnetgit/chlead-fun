@@ -11,16 +11,17 @@ import { fmtDate } from "@/lib/date";
 
 type BrandRow = { brandId: number; brandName: string };
 type UserRow = { userId: number; displayName: string; role: string; branchIds: number[] };
-type BranchRow = { branchId: number; brandId: number | null };
+type BranchRow = { branchId: number; branchName: string; brandId: number | null };
 type EventRow = {
   eventId: number; eventName: string; startDate: string | null; endDate: string | null;
   targetLeads: number | null; totalLeads: number; linePromoMessage: string | null;
+  branchId: number | null; branchName: string | null; canEdit: boolean;
   brands: { brandId: number; brandName: string }[];
   targets: { userId: number; displayName: string; targetLeads: number; actualLeads: number }[];
 };
 
-type Draft = { eventName: string; startDate: string; endDate: string; targetLeads: string; linePromoMessage: string; brandIds: number[]; targets: { userId: number; targetLeads: number }[] };
-const EMPTY: Draft = { eventName: "", startDate: "", endDate: "", targetLeads: "", linePromoMessage: "", brandIds: [], targets: [] };
+type Draft = { eventName: string; startDate: string; endDate: string; targetLeads: string; linePromoMessage: string; branchId: string; brandIds: number[]; targets: { userId: number; targetLeads: number }[] };
+const EMPTY: Draft = { eventName: "", startDate: "", endDate: "", targetLeads: "", linePromoMessage: "", branchId: "", brandIds: [], targets: [] };
 
 const d10 = (s: string | null) => (s ? s.slice(0, 10) : "");
 
@@ -35,14 +36,26 @@ export default function EventsPage() {
   const [editingId, setEditingId] = useState<number | null>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [me, setMe] = useState<{ role: string; funUserId: number } | null>(null);
+  const [allUsers, setAllUsers] = useState<UserRow[]>([]);
 
   const load = () => fetch("/api/events").then((r) => r.json()).then(setEvents);
   useEffect(() => {
     load();
     fetch("/api/brands").then((r) => r.json()).then(setBrands);
-    fetch("/api/users").then((r) => r.json()).then((us: UserRow[]) => setUsers(us.filter((u) => u.role === "sales" || u.role === "manager")));
+    fetch("/api/users").then((r) => r.json()).then((us: UserRow[]) => {
+      setAllUsers(us);
+      setUsers(us.filter((u) => u.role === "sales" || u.role === "manager"));
+    });
     fetch("/api/branches?all=1").then((r) => r.json()).then((d) => setBranches(d.branches));
+    fetch("/api/me").then((r) => r.json()).then((d) => { if (d.user) setMe({ role: d.user.role, funUserId: d.user.funUserId }); });
   }, []);
+
+  // Branch options for the owner selector: admin/gm pick any branch (or none
+  // = central event); a manager only their own branches, and must pick one.
+  const isManager = me?.role === "manager";
+  const myBranchIds = isManager ? (allUsers.find((u) => u.userId === me?.funUserId)?.branchIds ?? []) : null;
+  const branchOptions = branches.filter((b) => !isManager || (myBranchIds ?? []).includes(b.branchId));
 
   // Only salespeople whose branch access covers at least one of the event's
   // selected brands can sensibly get a per-sales target for it.
@@ -56,6 +69,7 @@ export default function EventsPage() {
       eventName: e.eventName, startDate: d10(e.startDate), endDate: d10(e.endDate),
       targetLeads: e.targetLeads !== null ? String(e.targetLeads) : "",
       linePromoMessage: e.linePromoMessage ?? "",
+      branchId: e.branchId !== null ? String(e.branchId) : "",
       brandIds: e.brands.map((b) => b.brandId),
       targets: e.targets.map((t) => ({ userId: t.userId, targetLeads: t.targetLeads })),
     });
@@ -64,12 +78,14 @@ export default function EventsPage() {
 
   async function save() {
     if (!draft.eventName.trim() || !draft.startDate || !draft.endDate) { setError("กรอกชื่อและช่วงวันที่ก่อน"); return; }
+    if (isManager && !draft.branchId) { setError("เลือกสาขาเจ้าของ event ก่อน"); return; }
     setSaving(true); setError(null);
     const eligibleIds = new Set(eligibleUsers.map((u) => u.userId));
     const body = {
       eventName: draft.eventName, startDate: draft.startDate, endDate: draft.endDate,
       targetLeads: draft.targetLeads ? Number(draft.targetLeads) : null,
       linePromoMessage: draft.linePromoMessage.trim() || null,
+      branchId: draft.branchId ? Number(draft.branchId) : null,
       brandIds: draft.brandIds, targets: draft.targets.filter((t) => eligibleIds.has(t.userId)),
     };
     const res = await fetch(editingId === null ? "/api/events" : `/api/events/${editingId}`, {
@@ -134,10 +150,15 @@ export default function EventsPage() {
               {isLive(e) && <span className="ml-2 text-[.62rem] font-semibold bg-[var(--accent-soft)] text-[var(--accent-text)] px-2 py-0.5 rounded-full">กำลังจัด</span>}
             </h3>
             <span className="text-[.76rem] text-[var(--text-2)]">{fmtDate(e.startDate)} → {fmtDate(e.endDate)}</span>
-            <button onClick={() => startEdit(e)} className="p-1.5 rounded hover:bg-[var(--accent-soft)]"><Pencil size={14} /></button>
-            <button onClick={() => remove(e)} className="p-1.5 rounded hover:bg-[var(--red-soft)] text-[var(--red)]"><Trash2 size={14} /></button>
+            {e.canEdit && <>
+              <button onClick={() => startEdit(e)} className="p-1.5 rounded hover:bg-[var(--accent-soft)]"><Pencil size={14} /></button>
+              <button onClick={() => remove(e)} className="p-1.5 rounded hover:bg-[var(--red-soft)] text-[var(--red)]"><Trash2 size={14} /></button>
+            </>}
           </div>
           <div className="flex gap-2 flex-wrap text-[.72rem]">
+            <span className={`px-2 py-0.5 rounded-full font-medium ${e.branchName ? "bg-[var(--accent-soft)] text-[var(--accent-text)]" : "bg-[var(--surface-2)] text-[var(--text-3)]"}`}>
+              {e.branchName ?? "งานกลาง"}
+            </span>
             {e.brands.map((b) => <span key={b.brandId} className="bg-[var(--bg)] px-2 py-0.5 rounded-full">{b.brandName}</span>)}
           </div>
           <div className="flex items-center gap-3">
@@ -178,6 +199,14 @@ export default function EventsPage() {
           <label className="block">
             <span className="text-[11px] font-medium text-[var(--text-2)] mb-1 block">เป้า Lead รวม</span>
             <input type="number" value={draft.targetLeads} onChange={(e) => setDraft({ ...draft, targetLeads: e.target.value })} className={inputCls} placeholder="เช่น 80" />
+          </label>
+          <label className="block">
+            <span className="text-[11px] font-medium text-[var(--text-2)] mb-1 block">สาขาเจ้าของ event {isManager ? "*" : ""}</span>
+            <select value={draft.branchId} onChange={(e) => setDraft({ ...draft, branchId: e.target.value })} className={inputCls}>
+              {!isManager && <option value="">— งานกลาง (admin/gm ดูแล) —</option>}
+              {isManager && <option value="">— เลือกสาขา —</option>}
+              {branchOptions.map((b) => <option key={b.branchId} value={b.branchId}>{b.branchName}</option>)}
+            </select>
           </label>
         </div>
 

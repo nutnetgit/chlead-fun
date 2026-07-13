@@ -1,10 +1,21 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { requireRole, managerAllowedBranchIds } from "@/lib/authz";
 
 // Events (manager-configured, stored in fun_campaign + junctions).
 // ?active=1 → only events running today (for the sales QR picker).
 // Metrics come along: actual lead counts per event and per salesperson.
+//
+// Branch scoping (user req 2026-07-13): every role still SEES every event —
+// cross-branch visibility is useful (who's at which mall). Only writes are
+// scoped: manager may create/edit/delete events of their own branches only;
+// branch NULL = central event, admin/gm-managed. `canEdit` is computed here
+// so the page can hide buttons, but PUT/DELETE re-check server-side.
 export async function GET(request: NextRequest) {
+  const rq = await requireRole(["sales", "manager", "gm", "admin"]);
+  if (!rq.ok) return rq.response;
+  const myBranchIds = rq.role === "manager" ? await managerAllowedBranchIds(rq.funUserId!) : null;
+
   const activeOnly = request.nextUrl.searchParams.get("active") === "1";
   const today = new Date(); today.setHours(0, 0, 0, 0);
 
@@ -22,22 +33,30 @@ export async function GET(request: NextRequest) {
     _count: true,
   });
 
-  const [brands, users] = await Promise.all([
+  const [brands, users, branches] = await Promise.all([
     prisma.brand.findMany(),
     prisma.funUser.findMany(),
+    prisma.branch.findMany(),
   ]);
   const brandName = new Map(brands.map((b) => [b.brandId, b.brandName]));
   const userName = new Map(users.map((u) => [u.userId, u.displayName]));
+  const branchName = new Map(branches.map((b) => [b.branchId, b.branchName]));
 
   return NextResponse.json(events.map((e) => {
     const counts = leadCounts.filter((c) => c.campaignId === e.campaignId);
     const totalLeads = counts.reduce((s, c) => s + c._count, 0);
+    const canEdit =
+      rq.role === "admin" || rq.role === "gm" ||
+      (rq.role === "manager" && e.branchId !== null && (myBranchIds ?? []).includes(e.branchId));
     return {
       eventId: e.campaignId,
       eventName: e.campaignName,
       startDate: e.startDate, endDate: e.endDate,
       targetLeads: e.targetLeads,
       linePromoMessage: e.linePromoMessage,
+      branchId: e.branchId,
+      branchName: e.branchId !== null ? branchName.get(e.branchId) ?? "?" : null,
+      canEdit,
       totalLeads,
       brands: e.brands.map((b) => ({ brandId: b.brandId, brandName: brandName.get(b.brandId) ?? "?" })),
       targets: e.targets.map((t) => ({
@@ -51,12 +70,26 @@ export async function GET(request: NextRequest) {
 }
 
 // Create event. Body: { eventName, startDate, endDate, targetLeads?,
-// brandIds: number[], targets: {userId, targetLeads}[] }
+// branchId?, brandIds: number[], targets: {userId, targetLeads}[] }
 export async function POST(request: NextRequest) {
+  const rq = await requireRole(["manager", "gm", "admin"]);
+  if (!rq.ok) return rq.response;
+
   const b = (await request.json().catch(() => ({}))) as Record<string, unknown>;
   const name = typeof b.eventName === "string" ? b.eventName.trim() : "";
   if (!name || !b.startDate || !b.endDate) {
     return NextResponse.json({ error: "missing eventName/startDate/endDate" }, { status: 400 });
+  }
+
+  // Branch ownership: a manager must file the event under one of their own
+  // branches (no central events from managers); admin/gm may pass null for a
+  // group-wide event.
+  const branchId = Number.isInteger(b.branchId) ? (b.branchId as number) : null;
+  if (rq.role === "manager") {
+    const allowed = await managerAllowedBranchIds(rq.funUserId!);
+    if (branchId === null || !allowed.includes(branchId)) {
+      return NextResponse.json({ error: "ผู้จัดการต้องระบุสาขาของตัวเองเป็นเจ้าของ event" }, { status: 403 });
+    }
   }
   const eventChannel =
     (await prisma.sourceChannel.findFirst({ where: { channelName: "Event / บูธ" } })) ??
@@ -66,6 +99,7 @@ export async function POST(request: NextRequest) {
     data: {
       campaignName: name,
       channelId: eventChannel.channelId,
+      branchId,
       startDate: new Date(String(b.startDate)),
       endDate: new Date(String(b.endDate)),
       targetLeads: typeof b.targetLeads === "number" ? b.targetLeads : null,

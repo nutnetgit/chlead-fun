@@ -53,3 +53,19 @@ export async function managerAllowedBrandIds(funUserId: number): Promise<number[
   const brandIds = [...new Set(links.map((l) => l.branch.brandId).filter((x): x is number => x !== null))];
   return brandIds;
 }
+
+/**
+ * Branch-scoped write access for managers (user req 2026-07-13, first used
+ * by /api/events): the branches a manager may act on = their fun_user_branch
+ * links plus their own home branch (fun_user.branch_id) as a safety net for
+ * accounts that were never given explicit links.
+ */
+export async function managerAllowedBranchIds(funUserId: number): Promise<number[]> {
+  const [links, user] = await Promise.all([
+    prisma.userBranch.findMany({ where: { userId: funUserId } }),
+    prisma.funUser.findUnique({ where: { userId: funUserId } }),
+  ]);
+  const ids = new Set(links.map((l) => l.branchId));
+  if (user?.branchId !== null && user?.branchId !== undefined) ids.add(user.branchId);
+  return [...ids];
+}

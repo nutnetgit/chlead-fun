@@ -9,7 +9,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { Send, Loader2, MessageCircleQuestion, ChevronLeft, FileText, Trash2 } from "lucide-react";
+import { Send, Loader2, ChevronLeft, FileText } from "lucide-react";
 import { fmtRelativeDay, fmtDateTime } from "@/lib/date";
 
 type Conversation = {
@@ -17,7 +17,6 @@ type Conversation = {
   ownerName: string | null;
   lastMessage: string | null; lastMessageAt: string | null; unreadCount: number;
 };
-type Unresolved = { lineUserId: string; lastMessage: string | null; lastMessageAt: string | null };
 type ChatMsg = { messageId: number; direction: string; body: string | null; sentByUserId: number | null; createdAt: string };
 
 // Deterministic pastel-ish color from a name, so avatars aren't all identical
@@ -71,7 +70,6 @@ function Avatar({ name, pictureUrl, size }: { name: string; pictureUrl?: string 
 
 export default function ChatPage() {
   const [conversations, setConversations] = useState<Conversation[] | null>(null);
-  const [unresolved, setUnresolved] = useState<Unresolved[]>([]);
   const [selectedLeadId, setSelectedLeadId] = useState<number | null>(null);
   const [messages, setMessages] = useState<ChatMsg[] | null>(null);
   const [text, setText] = useState("");
@@ -81,24 +79,16 @@ export default function ChatPage() {
   // only renders while an admin has it turned on.
   const [quotationEnabled, setQuotationEnabled] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
-  const loadInboxRef = useRef<() => void>(() => {});
 
   useEffect(() => {
     const loadInbox = () => fetch("/api/chat/inbox").then((r) => r.json()).then((d) => {
-      setConversations(d.conversations ?? []); setUnresolved(d.unresolved ?? []);
+      setConversations(d.conversations ?? []);
     }).catch(() => {});
-    loadInboxRef.current = loadInbox;
     loadInbox();
     fetch("/api/settings/features").then((r) => r.json()).then((f) => setQuotationEnabled(!!f.quotationEnabled)).catch(() => {});
     const t = setInterval(loadInbox, 5000);
     return () => clearInterval(t);
   }, []);
-
-  async function removeUnresolved(lineUserId: string) {
-    if (!confirm("ลบข้อความชุดนี้ออกจากระบบ?")) return;
-    await fetch(`/api/chat/unresolved/${encodeURIComponent(lineUserId)}`, { method: "DELETE" });
-    loadInboxRef.current();
-  }
 
   useEffect(() => {
     if (!selectedLeadId) { setMessages(null); return; }
@@ -138,7 +128,7 @@ export default function ChatPage() {
         <div className="flex-1 overflow-y-auto">
           {conversations === null ? (
             <p className="p-4 text-sm text-[var(--text-2)]">กำลังโหลด…</p>
-          ) : conversations.length === 0 && unresolved.length === 0 ? (
+          ) : conversations.length === 0 ? (
             <p className="p-4 text-sm text-[var(--text-2)]">ยังไม่มีข้อความ</p>
           ) : (
             <>
@@ -162,26 +152,6 @@ export default function ChatPage() {
                     )}
                   </div>
                 </button>
-              ))}
-              {unresolved.length > 0 && (
-                <div className="px-4 py-2 text-[.68rem] font-semibold text-[var(--text-3)] uppercase tracking-wide bg-[var(--bg)]">
-                  ไม่ทราบที่มา ({unresolved.length})
-                </div>
-              )}
-              {unresolved.map((u) => (
-                <div key={u.lineUserId} className="px-3.5 py-3 border-b border-[var(--border)] flex items-start gap-3">
-                  <div className="h-11 w-11 rounded-full bg-[var(--bg)] text-[var(--text-3)] flex items-center justify-center shrink-0">
-                    <MessageCircleQuestion size={16} />
-                  </div>
-                  <div className="min-w-0 flex-1">
-                    <div className="text-[.8rem] text-[var(--text-2)] truncate">{u.lastMessage ?? "—"}</div>
-                    <div className="text-[.66rem] text-[var(--text-3)] mt-0.5">{fmtRelativeDay(u.lastMessageAt)}</div>
-                  </div>
-                  <button onClick={() => removeUnresolved(u.lineUserId)} title="ลบ"
-                    className="p-1.5 rounded hover:bg-[var(--red-soft)] text-[var(--text-3)] hover:text-[var(--red)] shrink-0">
-                    <Trash2 size={14} />
-                  </button>
-                </div>
               ))}
             </>
           )}

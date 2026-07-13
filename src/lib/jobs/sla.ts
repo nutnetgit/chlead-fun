@@ -88,6 +88,12 @@ export async function runSlaJob() {
 
   for (const lead of leads) {
     try {
+      // Booking = the pipeline's finish line (user decision 2026-07-13: the
+      // lead system ends at จอง, no "delivered" stage). A booked lead is a
+      // win — never nudge/escalate/forfeit it; the booking auto-archive
+      // below is the only thing that still applies.
+      if (lead.stage === "booking") continue;
+
       // ── Lead Aging (user req 2026-07-11): buying intent decays with time —
       // a HOT lead idle past hotAgingDays auto-downgrades to WARM so it stops
       // skewing the Weighted Pipeline forecast and SLA urgency. Computed here
@@ -224,10 +230,42 @@ export async function runSlaJob() {
     await prisma.lead.updateMany({ where: { leadId: { in: toArchive } }, data: { archivedAt: now } });
   }
 
+  // ── Booking auto-archive (user req 2026-07-13): the lead system ends at
+  // จอง — a booked lead stays visible on the board for 5 days (so the team
+  // sees the win), then moves to the archive so จองแล้ว cards don't pile up
+  // forever. Anchor = when the lead ENTERED booking (latest stage-history
+  // row), not last activity — chatter after booking shouldn't keep it on
+  // the board. Never deleted; still counted in reports via stage history.
+  const BOOKING_ARCHIVE_DAYS = 5;
+  const bookingCutoff = new Date(now.getTime() - BOOKING_ARCHIVE_DAYS * DAY);
+  const bookedLeads = await prisma.lead.findMany({
+    where: { archivedAt: null, stage: "booking" },
+    select: { leadId: true, createdAt: true },
+  });
+  let bookingArchived = 0;
+  if (bookedLeads.length) {
+    const histories = await prisma.leadStageHistory.findMany({
+      where: { leadId: { in: bookedLeads.map((l) => l.leadId) }, toStage: "booking" },
+      orderBy: { changedAt: "desc" },
+    });
+    const enteredBookingAt = new Map<string, Date>();
+    for (const h of histories) {
+      const key = String(h.leadId);
+      if (!enteredBookingAt.has(key) && h.changedAt) enteredBookingAt.set(key, h.changedAt);
+    }
+    const toArchiveBooked = bookedLeads
+      .filter((l) => (enteredBookingAt.get(String(l.leadId)) ?? l.createdAt ?? now) <= bookingCutoff)
+      .map((l) => l.leadId);
+    if (toArchiveBooked.length) {
+      await prisma.lead.updateMany({ where: { leadId: { in: toArchiveBooked } }, data: { archivedAt: now } });
+      bookingArchived = toArchiveBooked.length;
+    }
+  }
+
   return {
     ok: true, checked: leads.length, autoResolved,
     firstResponseFlagged, nudged, escalated, forfeited, nurtured, agedDown,
-    archived: toArchive.length,
+    archived: toArchive.length, bookingArchived,
     errors: errors.length ? errors : undefined,
   };
 }

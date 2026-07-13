@@ -69,8 +69,12 @@ function OptionGroup({
       </div>
       {adding && (
         <div className="flex items-center gap-2 bg-[var(--bg)] rounded-xl p-3">
-          <input value={newName} onChange={(e) => setNewName(e.target.value)} placeholder="ชื่อรายการ" className={inputCls + " flex-1 max-w-md"} autoFocus />
-          <input value={newValue} onChange={(e) => setNewValue(e.target.value)} placeholder={valueLabel} inputMode="decimal" className={inputCls + " w-36 text-right"} />
+          {/* inputCls carries w-full, and .w-full sits AFTER fixed widths in
+              the generated sheet — a w-32 on the same element silently loses
+              (this was the "edit row blows past the screen" bug). Fixed-width
+              fields therefore get a sized wrapper instead of a width class. */}
+          <input value={newName} onChange={(e) => setNewName(e.target.value)} placeholder="ชื่อรายการ" maxLength={200} className={inputCls + " flex-1 min-w-0 max-w-2xl"} autoFocus />
+          <div className="w-32 shrink-0"><input value={newValue} onChange={(e) => setNewValue(e.target.value)} placeholder={valueLabel} inputMode="decimal" maxLength={30} className={inputCls + " text-right"} /></div>
           <button onClick={submit} disabled={saving}
             className="px-3 py-2 rounded-lg text-[.8rem] font-medium bg-[var(--primary)] text-white hover:bg-[var(--accent-text)] disabled:opacity-50">
             {saving ? <Loader2 size={14} className="animate-spin" /> : "บันทึก"}
@@ -97,8 +101,8 @@ function OptionGroup({
                   <td colSpan={5} className="py-2 pr-3">
                     <div className="flex items-center gap-2">
                       <span className="text-[var(--text-3)] w-6 shrink-0">{i + 1}</span>
-                      <input value={editName} onChange={(e) => setEditName(e.target.value)} className={inputCls + " flex-1"} autoFocus />
-                      <input value={editValue} onChange={(e) => setEditValue(e.target.value)} placeholder={valueLabel} inputMode="decimal" className={inputCls + " w-44 text-right shrink-0"} />
+                      <input value={editName} onChange={(e) => setEditName(e.target.value)} maxLength={200} className={inputCls + " flex-1 min-w-0 max-w-2xl"} autoFocus />
+                      <div className="w-32 shrink-0"><input value={editValue} onChange={(e) => setEditValue(e.target.value)} placeholder={valueLabel} inputMode="decimal" maxLength={30} className={inputCls + " text-right"} /></div>
                       <button onClick={() => submitEdit(r)} disabled={editSaving}
                         className="p-1.5 rounded hover:bg-[var(--accent-soft)] text-[var(--accent-text)]" title="บันทึก">
                         {editSaving ? <Loader2 size={14} className="animate-spin" /> : <Check size={14} />}

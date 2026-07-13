@@ -178,21 +178,17 @@ export async function POST(request: NextRequest) {
         });
         const activeLeadIds = ident?.person.leads.map((l) => l.leadId) ?? [];
 
-        // Staff testing/replying to the OA directly with their own LINE
-        // account isn't a customer inquiry (user-reported 2026-07-12: the
-        // webhook was pulling these into /chat's "unresolved" bucket,
-        // cluttering it with internal noise) — but ONLY skip when it truly
-        // has no lead to attach to. Checked AFTER lead resolution (fixed
-        // 2026-07-13): a staff member testing their own QR flow with their
-        // own LINE account resolves to a real active lead, and that reply
-        // must still show up — the earlier staff-check ran first and
-        // silently dropped it even though a lead existed.
-        if (activeLeadIds.length === 0) {
-          const isStaff = await prisma.funUser.findFirst({ where: { lineUserid: sourceUserId } });
-          if (isStaff) continue;
-        }
+        // Only messages that resolve to a QR-registered lead belong in the
+        // system (user req 2026-07-13: unrelated OA chatter — service
+        // inquiries, staff tests, random adds — must not be stored at all).
+        // This supersedes the old "unresolved bucket" (leadId null rows) AND
+        // the staff-account filter: no lead → drop, regardless of sender.
+        // NOTE (kept from the 2026-07-13 fix): any staff-sender check must
+        // never run BEFORE lead resolution — a staff member testing their
+        // own QR flow resolves to a real lead and must still be logged.
+        if (activeLeadIds.length === 0) continue;
 
-        const targets: (bigint | null)[] = activeLeadIds.length ? activeLeadIds : [null];
+        const targets: bigint[] = activeLeadIds;
 
         for (const leadId of targets) {
           // Retry-safety per (leadId, lineMessageId) — an explicit check

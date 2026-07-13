@@ -431,6 +431,9 @@ model Campaign {
   campaignName     String    @map("campaign_name") @db.VarChar(200)
   channelId        Int?      @map("channel_id")
   brandId          Int?      @map("brand_id")
+  // Owning branch (sql/029) — scopes WRITE access per-branch for managers;
+  // NULL = central/group event, admin/gm-managed. Read stays global.
+  branchId         Int?      @map("branch_id")
   startDate        DateTime? @map("start_date") @db.Date
   endDate          DateTime? @map("end_date") @db.Date
   budget           Decimal?  @db.Decimal(12, 2)

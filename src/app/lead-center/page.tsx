@@ -4,7 +4,7 @@
 // responsible salesperson: per-person workload summary + filterable table.
 
 import { useEffect, useMemo, useState } from "react";
-import { AlertTriangle, ChevronLeft, ChevronRight } from "lucide-react";
+import { AlertTriangle, ChevronLeft, ChevronRight, ChevronUp, ChevronDown, ChevronsUpDown } from "lucide-react";
 import { ContactPanel } from "@/components/ContactPanel";
 
 const PER_PAGE = 20;
@@ -42,6 +42,36 @@ const TEMP_CLS: Record<string, string> = {
   cold: "bg-[var(--bg)] text-[var(--text-3)]",
 };
 
+// Sortable columns (user req 2026-07-13). temp sorts hot→warm→cold→none by
+// rank, not alphabetically; stage follows the pipeline order in STAGE_TH.
+type SortKey = "customer" | "owner" | "brand" | "temp" | "stage" | "daysIdle";
+const TEMP_RANK: Record<string, number> = { hot: 0, warm: 1, cold: 2 };
+const STAGE_RANK = Object.fromEntries(Object.keys(STAGE_TH).map((k, i) => [k, i]));
+const SORT_VAL: Record<SortKey, (r: LeadRow) => string | number> = {
+  customer: (r) => r.customerName,
+  owner: (r) => r.ownerName ?? "￿", // ไม่มีเจ้าของ ไปท้ายเสมอ
+  brand: (r) => `${r.brand} ${r.modelInterest ?? ""}`,
+  temp: (r) => r.temperature ? TEMP_RANK[r.temperature] ?? 3 : 4,
+  stage: (r) => STAGE_RANK[r.stage] ?? 99,
+  daysIdle: (r) => r.daysIdle,
+};
+
+function SortTh({ label, k, sort, onSort, first }: {
+  label: string; k: SortKey; sort: { key: SortKey; dir: 1 | -1 } | null;
+  onSort: (k: SortKey) => void; first?: boolean;
+}) {
+  const active = sort?.key === k;
+  return (
+    <th className={`py-2 ${first ? "px-5" : "pr-3"}`}>
+      <button onClick={() => onSort(k)}
+        className={`inline-flex items-center gap-1 hover:text-[var(--text)] transition ${active ? "text-[var(--text)] font-semibold" : ""}`}>
+        {label}
+        {active ? (sort!.dir === 1 ? <ChevronUp size={11} /> : <ChevronDown size={11} />) : <ChevronsUpDown size={11} className="opacity-40" />}
+      </button>
+    </th>
+  );
+}
+
 export default function LeadCenterPage() {
   const [rows, setRows] = useState<LeadRow[] | null>(null);
   const [ownerFilter, setOwnerFilter] = useState<string>("");
@@ -49,7 +79,11 @@ export default function LeadCenterPage() {
   const [selected, setSelected] = useState<number | null>(null);
   const [showArchived, setShowArchived] = useState(false);
   const [brandFilter, setBrandFilter] = useState<string>("");
-  useEffect(() => { setPage(1); }, [ownerFilter, showArchived, brandFilter]);
+  const [sort, setSort] = useState<{ key: SortKey; dir: 1 | -1 } | null>(null);
+  useEffect(() => { setPage(1); }, [ownerFilter, showArchived, brandFilter, sort]);
+
+  // Click a header: 1st = ascending, 2nd = descending, 3rd = back to default.
+  const onSort = (k: SortKey) => setSort((s) => s?.key !== k ? { key: k, dir: 1 } : s.dir === 1 ? { key: k, dir: -1 } : null);
 
   const load = () => { fetch(`/api/leads?filter=${showArchived ? "archived" : "all"}`).then((r) => r.json()).then(setRows); };
   useEffect(load, [showArchived]);
@@ -76,6 +110,14 @@ export default function LeadCenterPage() {
   const filtered = (rows ?? []).filter((r) =>
     (!ownerFilter || (ownerFilter === "none" ? r.ownerUserId === null : String(r.ownerUserId) === ownerFilter)) &&
     (!brandFilter || r.brand === brandFilter));
+  if (sort) {
+    const val = SORT_VAL[sort.key];
+    filtered.sort((a, b) => {
+      const [x, y] = [val(a), val(b)];
+      const cmp = typeof x === "number" && typeof y === "number" ? x - y : String(x).localeCompare(String(y), "th");
+      return cmp * sort.dir;
+    });
+  }
 
   return (
     <div className="space-y-5">
@@ -137,9 +179,12 @@ export default function LeadCenterPage() {
             <table className="w-full text-sm">
               <thead>
                 <tr className="text-left text-[11px] text-[var(--text-3)] border-b border-[var(--border)]">
-                  <th className="py-2 px-5">ลูกค้า</th><th className="py-2 pr-3">เซลส์</th>
-                  <th className="py-2 pr-3">แบรนด์/รุ่น</th><th className="py-2 pr-3">Temp</th>
-                  <th className="py-2 pr-3">สถานะ</th><th className="py-2 pr-3">ค้าง (วัน)</th>
+                  <SortTh label="ลูกค้า" k="customer" sort={sort} onSort={onSort} first />
+                  <SortTh label="เซลส์" k="owner" sort={sort} onSort={onSort} />
+                  <SortTh label="แบรนด์/รุ่น" k="brand" sort={sort} onSort={onSort} />
+                  <SortTh label="Temp" k="temp" sort={sort} onSort={onSort} />
+                  <SortTh label="สถานะ" k="stage" sort={sort} onSort={onSort} />
+                  <SortTh label="ค้าง (วัน)" k="daysIdle" sort={sort} onSort={onSort} />
                   <th className="py-2 pr-5">activity ล่าสุด</th>
                 </tr>
               </thead>

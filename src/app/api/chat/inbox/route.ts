@@ -7,9 +7,9 @@ import { requireRole } from "@/lib/authz";
  * one fun_chat_message, most-recent-first, with a naive "unread" flag (latest
  * message is inbound — i.e. nothing outbound has answered it yet). Scoped
  * like /leads already is: sales sees only their own leads; manager/gm/admin
- * see everything. The "ไม่ทราบที่มา" bucket (messages from a LINE user we
- * couldn't resolve to any lead — never scanned a QR) is manager+ only, since
- * a sales user has no lead to triage it against anyway.
+ * see everything. The old "ไม่ทราบที่มา" bucket is gone (user req
+ * 2026-07-13): the webhook now drops messages that don't resolve to a
+ * QR-registered lead instead of storing them with leadId null.
  */
 export async function GET() {
   const rq = await requireRole(["sales", "manager", "gm", "admin"]);
@@ -66,18 +66,5 @@ export async function GET() {
     };
   }).sort((a, b) => (b.lastMessageAt?.getTime() ?? 0) - (a.lastMessageAt?.getTime() ?? 0));
 
-  let unresolved: { lineUserId: string; lastMessage: string | null; lastMessageAt: Date | null }[] = [];
-  if (rq.role !== "sales") {
-    const unresolvedMsgs = await prisma.chatMessage.findMany({ where: { leadId: null }, orderBy: { createdAt: "desc" } });
-    const byLineId = new Map<string, typeof unresolvedMsgs>();
-    for (const m of unresolvedMsgs) {
-      if (!byLineId.has(m.lineUserId)) byLineId.set(m.lineUserId, []);
-      byLineId.get(m.lineUserId)!.push(m);
-    }
-    unresolved = [...byLineId.entries()].map(([lineUserId, msgs]) => ({
-      lineUserId, lastMessage: msgs[0]?.body ?? null, lastMessageAt: msgs[0]?.createdAt ?? null,
-    }));
-  }
-
-  return NextResponse.json({ conversations, unresolved });
+  return NextResponse.json({ conversations, unresolved: [] });
 }

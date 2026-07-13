@@ -58,8 +58,10 @@ function SourceGroup({
       {adding && (
         <div className="flex items-center gap-2 bg-[var(--bg)] rounded-xl p-3 flex-wrap">
           <input value={newName} onChange={(e) => setNewName(e.target.value)} placeholder="ชื่อช่องทาง" className={inputCls + " flex-1 min-w-[10rem]"} autoFocus />
-          <input value={newPerson} onChange={(e) => setNewPerson(e.target.value)} placeholder="ผู้ดูแล" className={inputCls + " w-36"} />
-          <input value={newBudget} onChange={(e) => setNewBudget(e.target.value)} placeholder="งบรวม" inputMode="decimal" className={inputCls + " w-28"} />
+          {/* inputCls carries w-full which outranks fixed width classes in the
+              generated sheet — size via wrapper divs, not w-* on the input. */}
+          <div className="w-36 shrink-0"><input value={newPerson} onChange={(e) => setNewPerson(e.target.value)} placeholder="ผู้ดูแล" className={inputCls} /></div>
+          <div className="w-28 shrink-0"><input value={newBudget} onChange={(e) => setNewBudget(e.target.value)} placeholder="งบรวม" inputMode="decimal" className={inputCls} /></div>
           <button onClick={submit} disabled={saving}
             className="px-3 py-2 rounded-lg text-[.8rem] font-medium bg-[var(--primary)] text-white hover:bg-[var(--accent-text)] disabled:opacity-50">
             {saving ? <Loader2 size={14} className="animate-spin" /> : "บันทึก"}
@@ -88,12 +90,12 @@ function SourceGroup({
                 <td className="py-2 pr-3 text-[var(--text-3)]">{i + 1}</td>
                 <td className={`py-2 pr-3 ${r.isActive ? "" : "text-[var(--red)]"}`}>{r.channelName}</td>
                 <td className="py-2 pr-3">
-                  <input defaultValue={r.responsiblePerson ?? ""} onBlur={(e) => onUpdate(r, "responsiblePerson", e.target.value)}
-                    className={inputCls + " py-1.5 text-[.8rem] w-32"} placeholder="—" />
+                  <div className="w-32"><input defaultValue={r.responsiblePerson ?? ""} onBlur={(e) => onUpdate(r, "responsiblePerson", e.target.value)}
+                    className={inputCls + " py-1.5 text-[.8rem]"} placeholder="—" /></div>
                 </td>
                 <td className="py-2 pr-3">
-                  <input defaultValue={r.budget ?? ""} onBlur={(e) => onUpdate(r, "budget", e.target.value)}
-                    inputMode="decimal" className={inputCls + " py-1.5 text-[.8rem] w-24"} placeholder="—" />
+                  <div className="w-24"><input defaultValue={r.budget ?? ""} onBlur={(e) => onUpdate(r, "budget", e.target.value)}
+                    inputMode="decimal" className={inputCls + " py-1.5 text-[.8rem]"} placeholder="—" /></div>
                 </td>
                 <td className="py-2 pr-3">
                   <div className="flex items-center gap-2">

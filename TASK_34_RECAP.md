@@ -1,8 +1,8 @@
 # Task #34 Recap: Chat inbound bug fix, PDF redesign, QR intake rules, misc UX
 
-**Status:** All changes built + typecheck-clean. Deploy state described in §8 — the earlier batch (delivery-fee schema + first PDF pass) was deployed mid-session; the later batch (chat fix, PDF blue/no-sig/note redesign, quotation-options widths, timeframe→temperature, LINE-name preservation) was built clean and pending final deploy confirmation at recap time.
+**Status:** ✅ ALL DEPLOYED (multiple deploy cycles through 2026-07-13, endpoints verified 200 after each). Sections §1-§7 = the original batch; §8-§9 = same-day follow-up batches (chat filter, event branch permissions, booking auto-archive, PDF brown, width-bug fix), all live.
 
-**Live at:** https://fun.ch-erawan.com
+**Live at:** https://fun.ch-erawan.com · **GitHub:** github.com/nutnetgit/chlead-fun (master)
 
 ---
 
@@ -85,7 +85,36 @@ Nutt: when a customer registers via LINE, store/show whatever comes from their L
 
 ---
 
-## 7. Outstanding / carried forward
+## 7a. Same-day follow-up batch A (deployed)
+
+- **Chat filter hardened (supersedes part of §1):** the webhook now DROPS any inbound message that doesn't resolve to a QR-registered lead — nothing is stored with `leadId null` anymore. The "ไม่ทราบที่มา" bucket was removed entirely (UI section in `/chat`, `unresolved` query in `/api/chat/inbox`, and the orphaned `/api/chat/unresolved/[lineUserId]` DELETE route). Old unresolved rows were deleted by Nutt via the UI before removal. Kept invariant: any staff-sender check must never run before lead resolution.
+- **Lead Center sortable columns:** all 6 headers (ลูกค้า/เซลส์/แบรนด์รุ่น/Temp/สถานะ/ค้างวัน) click-sort asc→desc→default. Temp sorts hot→warm→cold by rank; สถานะ by pipeline order.
+- **Mazda สำนักงานใหญ่ (branch_id 1) deleted from prod:** blocked by 10 old test leads (all `lost`, "ทดสอบเพจจิ้ง" names) — deleted them + all child rows; 10 active leads on other branches referenced them via `origin_lead_id` (switch-brand tests) → severed with SET NULL, active leads untouched.
+- **Events visibility confirmed:** all events global, no owner column — led directly to §8.
+
+## 8. Same-day follow-up batch B (deployed): event branch permissions + booking auto-archive
+
+**Event branch scoping** (`sql/029_event_branch.sql` — applied to prod as root):
+- `fun_campaign.branch_id` INT NULL. NULL = central/group event (admin/gm-managed).
+- **Read stays global for every role** (cross-branch visibility is a feature); only WRITES are scoped: manager can create/edit/delete only events owned by one of their branches (`managerAllowedBranchIds()` — new helper in `src/lib/authz.ts` = userBranch links + home branch); manager MUST pick one of their branches on create (no central events from managers).
+- Enforced server-side in POST `/api/events` and PUT/DELETE `/api/events/[id]` (shared `checkEventWriteAccess()`); GET also now has `requireRole` (was previously unauthenticated!) and returns `canEdit` per event so the page hides buttons.
+- UI: "สาขาเจ้าของ event" dropdown on the create/edit form (manager sees only own branches, required; admin/gm any branch or งานกลาง), branch chip on each event card.
+
+**Booking auto-archive** (`src/lib/jobs/sla.ts`, user decisions: no "delivered" stage — the lead system ends at จอง; 5-day window):
+- New pass in the hourly SLA job: leads at `stage='booking'` archive 5 days after ENTERING booking (anchor = latest `fun_lead_stage_history` row with `toStage='booking'`, column is `changedAt` NOT createdAt) — post-booking chat doesn't keep them on the board.
+- Also fixed: booking-stage leads now SKIP the SLA idle ladder entirely (previously a booked lead could be nudged/escalated/forfeited — wrong, it's a closed win).
+
+## 9. Same-day follow-up batch C (deployed): PDF brown + the w-full width bug
+
+- **PDF re-toned AGAIN — final = warm brown** (`ACCENT #6e5010`, `ACCENT_SOFT #f6efde`), matching the app's gold/brown identity (globals.css `--accent-text #B57F06` family, darkened for print contrast). Supersedes §2's navy. Everything else from §2 (no signatures, note last-page-only, full displayName) unchanged.
+- **The quotation-options textbox bug — real root cause found on 3rd attempt:** `inputCls` (src/components/ui.tsx) embeds `w-full`, and in Tailwind's generated sheet `.w-full` sits AFTER the fixed-width utilities — so any `w-32`/`w-36`/`w-44` added alongside `inputCls` silently loses and the input renders 100% wide (that's why both earlier "width fixes" changed nothing and the edit row blew past the screen). **Correct pattern: never put a fixed `w-*` on an element using `inputCls`; wrap it in a sized `<div className="w-32 shrink-0">` instead.** Fixed in `/settings/quotation-options` (add + edit rows, name maxLength 200 / value maxLength 30) and the same latent bug in `/settings/sources` (4 spots).
+
+## 10. Strategy answers given (not yet built — see chlead-fun-sps-integration memory)
+
+- **SPS integration** (vehicle/price catalog → quotation; lead→SPS booking handoff): SPS source at `D:\adamsps`, tables `stock_model`/`stock_model_color`/`stock_color`/`adam_sale_order`; reuse the SERVICE_BOOKING_PROXY.md api-key proxy pattern (add-only PHP endpoints). Items 3 & 5 of that discussion are independent — catalog pull first, handoff later, sharing one api_key.
+- **Better Auth prep:** keep identity vs authorization split; future `fun_user.auth_subject_id` column; auth entry point already isolated in `src/auth.ts`.
+
+## 11. Outstanding / carried forward
 
 - **Chat-response SLA metric** (ADR-016) — now unblocked (chat inbound bug fixed). Deferred until Nutt asks; extend the existing SLA Engine, don't build parallel.
 - **Lepas vehicle model lineup** — still placeholders ("Model 1/2/3"), needs real names.

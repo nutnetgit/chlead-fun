@@ -115,12 +115,15 @@ const L = {
   disclaimerNote: "หมายเหตุ (Note):",
 };
 
-// Dark/light navy blue (user req 2026-07-13, switched from the app's teal).
-const ACCENT = "#1c3e6e";
-const ACCENT_SOFT = "#e6ecf6";
-const INK = "#1c2733";
-const MUTED = "#606c7a";
-const LINE = "#d7dfe9";
+// App's own warm brown/gold identity (user req 2026-07-13, switched from
+// navy): dark-brown section bars + light-brown/cream soft fills — same
+// family as globals.css (--accent-text #B57F06 / --accent-soft #FCF3DC),
+// darkened for white-on-accent print contrast.
+const ACCENT = "#6e5010";
+const ACCENT_SOFT = "#f6efde";
+const INK = "#22201b";
+const MUTED = "#6e6a60";
+const LINE = "#e3dccb";
 const GREEN = "#1c7a4a";
 const AMBER = "#a05c14";
 const DUE = "#b23b2e";
