@@ -12,7 +12,7 @@ type Data = {
   scope: string;
   brandId: number | null;
   leadTarget: { leadsPerBooking: number; fromBooking: number | null; fromEvents: number; total: number | null };
-  config: { target: number | null; teamMonthlyTarget: number | null; perUser: Record<string, number> };
+  config: { target: number | null; perUser: Record<string, number> };
   month: { name: number; daysElapsed: number; daysLeft: number; daysInMonth: number; actualBookings: number; target: number | null; carryIn: number; neededThisMonth: number | null };
   leads: { toDate: number; projected: number; expectedRest: number };
   conversion: { windowDays: number; cohortLeads: number; cohortConverted: number; rate: number };
@@ -37,12 +37,10 @@ export default function RunRatePage() {
   const me = useMe();
   const isSales = me?.user?.role === "sales";
   const [d, setD] = useState<Data | null>(null);
-  const [users, setUsers] = useState<UserRow[]>([]);
   const [allUsers, setAllUsers] = useState<UserRow[]>([]);
   const [brands, setBrands] = useState<BrandRow[]>([]);
   const [branches, setBranches] = useState<BranchRow[]>([]);
   const [brandFilter, setBrandFilter] = useState<number | null>(null);
-  const [teamTarget, setTeamTarget] = useState("");
   const [perUser, setPerUser] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
 
@@ -53,41 +51,85 @@ export default function RunRatePage() {
     const q = params.toString() ? `?${params.toString()}` : "";
     fetch(`/api/runrate${q}`).then((r) => r.json()).then((data: Data) => {
       setD(data);
-      setTeamTarget(data.config.teamMonthlyTarget ? String(data.config.teamMonthlyTarget) : "");
+      // Server always returns the FULL perUser map regardless of brandId
+      // filter (targets are keyed brandId:userId already) — no client-side
+      // re-keying needed.
       setPerUser(Object.fromEntries(Object.entries(data.config.perUser).map(([k, v]) => [k, String(v)])));
     });
   }, [isSales, me, brandFilter]);
   useEffect(() => { load(); }, [load]);
   useEffect(() => {
-    fetch("/api/users").then((r) => r.json()).then((us: UserRow[]) => {
-      setAllUsers(us);
-      setUsers(us.filter((u) => u.role === "sales" || u.role === "manager"));
-    });
+    fetch("/api/users").then((r) => r.json()).then((us: UserRow[]) => setAllUsers(us));
     fetch("/api/branches").then((r) => r.json()).then((data) => { setBrands(data.brands ?? []); setBranches(data.branches ?? []); });
   }, []);
+
+  const role = me?.user?.role;
+  const self = allUsers.find((u) => u.userId === me?.user?.funUserId);
+  const myOwnBranchIds = new Set([...(self?.branchIds ?? []), ...(self?.branchId ? [self.branchId] : [])]);
 
   // Brand chips (user req 2026-07-14: multi-brand ผจก./เซลส์ need separated
   // and combined views): scoped to the brands of the viewer's own branches —
   // admin/gm see every brand; single-brand users get no chip bar at all.
   const myBrands = (() => {
-    const role = me?.user?.role;
     if (!role) return [];
     if (role === "admin" || role === "gm") return brands;
-    const self = allUsers.find((u) => u.userId === me?.user?.funUserId);
-    const branchIds = new Set([...(self?.branchIds ?? []), ...(self?.branchId ? [self.branchId] : [])]);
-    if (!branchIds.size) return brands;
-    const brandIds = new Set(branches.filter((b) => branchIds.has(b.branchId)).map((b) => b.brandId).filter((x): x is number => x !== null));
+    if (!myOwnBranchIds.size) return brands;
+    const brandIds = new Set(branches.filter((b) => myOwnBranchIds.has(b.branchId)).map((b) => b.brandId).filter((x): x is number => x !== null));
     return brands.filter((b) => brandIds.has(b.brandId));
   })();
 
+  // No "รวมทุกยี่ห้อ" combined view (user req 2026-07-14, removed after the
+  // per-brand target rework): every number on this page, including the read
+  // side, is now always scoped to exactly one brand — auto-picks the first
+  // brand the viewer can see once the brand list loads, so brandFilter is
+  // only ever null for the brief instant before that fetch resolves.
+  useEffect(() => {
+    if (brandFilter === null && myBrands.length > 0) setBrandFilter(myBrands[0].brandId);
+  }, [brandFilter, myBrands]);
+
+  // Per-brand booking-target editing (bug fixed 2026-07-14: a single flat
+  // target per user was ambiguous for anyone selling >1 brand — editing it
+  // under one brand's view silently overwrote the OTHER brand's real
+  // number). Editing now REQUIRES an unambiguous brand: either the viewer
+  // picked one via the chips above, or they only have exactly one brand to
+  // begin with (no chip bar shown at all in that case).
+  const editBrandId = brandFilter ?? (myBrands.length === 1 ? myBrands[0].brandId : null);
+
+  // Candidates for that brand: sales/manager users whose branch access
+  // includes a branch of editBrandId — further narrowed to the viewer's OWN
+  // branches when they're a manager (never company-wide, per user req:
+  // "filter ตั้งแต่แรกตามยี่ห้อ หรือตามสาขา ... ไม่มีการเอามารวมกันของทุกยี่ห้อ").
+  const eligibleForEdit = (() => {
+    if (editBrandId === null) return [];
+    const brandBranchIds = new Set(branches.filter((b) => b.brandId === editBrandId).map((b) => b.branchId));
+    const scopedBranchIds = role === "manager" && myOwnBranchIds.size
+      ? new Set([...brandBranchIds].filter((bid) => myOwnBranchIds.has(bid)))
+      : brandBranchIds;
+    return allUsers.filter((u) => {
+      if (u.role !== "sales" && u.role !== "manager") return false;
+      const ids = new Set([...(u.branchIds ?? []), ...(u.branchId ? [u.branchId] : [])]);
+      return [...ids].some((bid) => scopedBranchIds.has(bid));
+    });
+  })();
+
   async function saveConfig() {
+    if (editBrandId === null) return;
     setSaving(true);
+    const payload = Object.fromEntries(
+      Object.entries(perUser)
+        .filter(([k, v]) => k.startsWith(`${editBrandId}:`) && v && Number(v) > 0)
+        .map(([k, v]) => [k, Number(v)]),
+    );
+    // Explicitly clear any entry for an eligible user left blank (so
+    // removing a number in the box actually deletes the target, not just
+    // skips sending it).
+    for (const u of eligibleForEdit) {
+      const key = `${editBrandId}:${u.userId}`;
+      if (!(key in payload) && !perUser[key]) payload[key] = 0;
+    }
     await fetch("/api/runrate", {
       method: "PUT", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        teamMonthlyTarget: teamTarget ? Number(teamTarget) : undefined,
-        perUser: Object.fromEntries(Object.entries(perUser).filter(([, v]) => v && Number(v) > 0).map(([k, v]) => [k, Number(v)])),
-      }),
+      body: JSON.stringify({ perUser: payload }),
     });
     setSaving(false); load();
   }
@@ -107,14 +149,8 @@ export default function RunRatePage() {
       {myBrands.length > 1 && (
         <div className="flex items-center gap-2 flex-wrap">
           <span className="text-[11px] font-medium text-[var(--text-3)]">ยี่ห้อ</span>
-          <button onClick={() => setBrandFilter(null)}
-            className={`text-[.76rem] px-3 py-1 rounded-full border transition ${
-              brandFilter === null ? "bg-[var(--accent-soft)] border-[var(--primary)] text-[var(--accent-text)] font-medium"
-                                   : "bg-white border-[var(--border-2)] text-[var(--text-2)] hover:border-[var(--text-3)]"}`}>
-            รวมทุกยี่ห้อ
-          </button>
           {myBrands.map((b) => (
-            <button key={b.brandId} onClick={() => setBrandFilter(brandFilter === b.brandId ? null : b.brandId)}
+            <button key={b.brandId} onClick={() => setBrandFilter(b.brandId)}
               className={`text-[.76rem] px-3 py-1 rounded-full border transition ${
                 brandFilter === b.brandId ? "bg-[var(--accent-soft)] border-[var(--primary)] text-[var(--accent-text)] font-medium"
                                           : "bg-white border-[var(--border-2)] text-[var(--text-2)] hover:border-[var(--text-3)]"}`}>
@@ -244,28 +280,45 @@ export default function RunRatePage() {
         </Card>
 
         {!isSales && (
-          <Card title="ตั้งเป้าจอง (ผจก.)" desc="ตัวเลขทุกช่องในการ์ดนี้คือจำนวน 'เคสจอง' ต่อเดือน — เป้า Lead ไม่ต้องกรอก ระบบคูณให้อัตโนมัติจากตัวคูณในหน้า Conversion Rate (การ์ดเป้า Lead ด้านบน)">
-            <label className="block max-w-xs">
-              <span className="text-[11px] font-medium text-[var(--text-2)] mb-1 block">เป้าจองของทีม (เคสจอง/เดือน)</span>
-              <input type="number" value={teamTarget} onChange={(e) => setTeamTarget(e.target.value)} className={inputCls} placeholder="เช่น 25" />
-            </label>
-            <div>
-              <span className="text-[11px] font-medium text-[var(--text-2)] mb-2 block">เป้าจองรายเซลส์ (เคสจอง/เดือน)</span>
-              <div className="grid md:grid-cols-2 gap-x-6 gap-y-2">
-                {users.map((u) => (
-                  <label key={u.userId} className="flex items-center gap-2 text-[.8rem]">
-                    <span className="flex-1 truncate">{u.displayName}</span>
-                    <input type="number" min={0} value={perUser[String(u.userId)] ?? ""}
-                      onChange={(e) => setPerUser((p) => ({ ...p, [String(u.userId)]: e.target.value }))}
-                      className="w-20 px-2 py-1 text-sm bg-white border border-[var(--border-2)] rounded-lg text-right" placeholder="—" />
-                  </label>
-                ))}
-              </div>
-            </div>
-            <button onClick={saveConfig} disabled={saving}
-              className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold bg-[var(--primary)] text-[var(--primary-foreground)] hover:brightness-95 disabled:opacity-50">
-              {saving ? <Loader2 size={14} className="animate-spin" /> : null} บันทึกเป้าจอง
-            </button>
+          <Card title="ตั้งเป้าจอง (ผจก.)" desc="ตัวเลขทุกช่องในการ์ดนี้คือจำนวน 'เคสจอง' ต่อเดือน ต่อยี่ห้อ — เป้า Lead ไม่ต้องกรอก ระบบคูณให้อัตโนมัติจากตัวคูณในหน้า Conversion Rate (การ์ดเป้า Lead ด้านบน)">
+            {editBrandId === null ? (
+              <p className="text-[.82rem] text-[var(--text-2)] bg-[var(--bg)] rounded-xl px-3.5 py-3">
+                เลือกยี่ห้อจาก chip ด้านบนก่อน ถึงจะตั้งเป้ารายเซลส์ได้ — เซลส์บางคนขายได้หลายยี่ห้อ เป้าจองของแต่ละยี่ห้อจึงต้องแยกกันชัดเจน ไม่ปนกัน
+              </p>
+            ) : (
+              <>
+                <div className="flex items-center justify-between rounded-xl bg-[var(--accent-soft)] px-4 py-3">
+                  <span className="text-[.82rem] font-medium text-[var(--accent-text)]">
+                    เป้าทีม{brandFilter !== null ? ` (${brands.find((b) => b.brandId === editBrandId)?.brandName ?? ""})` : ""} — รวมจากเป้ารายเซลส์ด้านล่าง
+                  </span>
+                  <b className="num text-xl text-[var(--accent-text)]">{d.month.target ?? 0} เคส</b>
+                </div>
+                <div>
+                  <span className="text-[11px] font-medium text-[var(--text-2)] mb-2 block">เป้าจองรายเซลส์ (เคสจอง/เดือน)</span>
+                  {eligibleForEdit.length === 0 ? (
+                    <p className="text-[.76rem] text-[var(--text-3)]">ไม่มีเซลส์ที่ขายยี่ห้อนี้ในสาขาของคุณ</p>
+                  ) : (
+                    <div className="grid md:grid-cols-2 gap-x-6 gap-y-2">
+                      {eligibleForEdit.map((u) => {
+                        const key = `${editBrandId}:${u.userId}`;
+                        return (
+                          <label key={u.userId} className="flex items-center gap-2 text-[.8rem]">
+                            <span className="flex-1 truncate">{u.displayName}</span>
+                            <input type="number" min={0} value={perUser[key] ?? ""}
+                              onChange={(e) => setPerUser((p) => ({ ...p, [key]: e.target.value }))}
+                              className="w-20 px-2 py-1 text-sm bg-white border border-[var(--border-2)] rounded-lg text-right" placeholder="—" />
+                          </label>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+                <button onClick={saveConfig} disabled={saving}
+                  className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold bg-[var(--primary)] text-[var(--primary-foreground)] hover:brightness-95 disabled:opacity-50">
+                  {saving ? <Loader2 size={14} className="animate-spin" /> : null} บันทึกเป้าจอง
+                </button>
+              </>
+            )}
           </Card>
         )}
       </div>

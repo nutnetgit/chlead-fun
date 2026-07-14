@@ -26,7 +26,7 @@ export type Me = {
 const MeContext = createContext<Me | null>(null);
 export const useMe = () => useContext(MeContext);
 
-const BARE_ROUTES = ["/lead-form", "/login", "/pending", "/liff"];
+const BARE_ROUTES = ["/lead-form", "/login", "/pending", "/liff", "/terms", "/privacy", "/cookies"];
 
 // Page gate for per-user menu access (user req 2026-07-12): if the signed-in
 // user's effective menus don't include the menu this path belongs to, show a
@@ -61,7 +61,12 @@ export function Chrome({ children }: { children: React.ReactNode }) {
   });
 
   if (BARE_ROUTES.some((p) => pathname.startsWith(p))) {
-    return <main className="max-w-lg mx-auto px-4 py-8">{children}</main>;
+    // Legal pages read better a bit wider than the mobile-first forms this
+    // wrapper was originally sized for (lead-form/liff); LegalPage.tsx
+    // handles its own inner max-width/padding, so this just needs to not
+    // clip it down to the narrower form width.
+    const isLegal = ["/terms", "/privacy", "/cookies"].some((p) => pathname.startsWith(p));
+    return <main className={isLegal ? "" : "max-w-lg mx-auto px-4 py-8"}>{children}</main>;
   }
 
   const refreshMe = () => fetch("/api/me").then((r) => r.json()).then(setMe);

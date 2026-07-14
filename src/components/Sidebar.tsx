@@ -242,6 +242,19 @@ export function Sidebar({ role, me, onProfileSaved }: { role: string | null; me?
         {!mini && process.env.NEXT_PUBLIC_BUILD_VERSION && (
           <div className="text-[10px] text-[var(--text-3)] px-1 select-none">v{process.env.NEXT_PUBLIC_BUILD_VERSION}</div>
         )}
+        {/* Legal footer (user req 2026-07-14) — a SaaS handling customer PII
+            and running staff logins needs these three links reachable from
+            anywhere, not just buried in a settings page. */}
+        {!mini && (
+          <div className="px-1 space-y-1 select-none">
+            <div className="flex flex-wrap gap-x-2 gap-y-0.5 text-[9px] text-[var(--text-3)]">
+              <Link href="/terms" className="hover:underline hover:text-[var(--text-2)]">ข้อกำหนดการใช้งาน</Link>
+              <Link href="/privacy" className="hover:underline hover:text-[var(--text-2)]">ความเป็นส่วนตัว</Link>
+              <Link href="/cookies" className="hover:underline hover:text-[var(--text-2)]">คุกกี้</Link>
+            </div>
+            <div className="text-[9px] text-[var(--text-3)]">© 2026 Ch.Erawan Group. All rights reserved.</div>
+          </div>
+        )}
       </aside>
 
       {/* mobile: hamburger + drawer */}
@@ -260,6 +273,14 @@ export function Sidebar({ role, me, onProfileSaved }: { role: string | null; me?
             {/* Settings not needed on mobile (user req 2026-07-10) — admin
                 config work happens at a desk, not on a phone. */}
             <NavList onNavigate={() => setOpen(false)} role={role} menus={me?.user?.menus ?? null} hideCaptions={["ตั้งค่า"]} />
+            <div className="mt-4 pt-3 border-t border-[var(--border)] space-y-1">
+              <div className="flex flex-wrap gap-x-2 gap-y-0.5 text-[9px] text-[var(--text-3)]">
+                <Link href="/terms" className="hover:underline">ข้อกำหนดการใช้งาน</Link>
+                <Link href="/privacy" className="hover:underline">ความเป็นส่วนตัว</Link>
+                <Link href="/cookies" className="hover:underline">คุกกี้</Link>
+              </div>
+              <div className="text-[9px] text-[var(--text-3)]">© 2026 Ch.Erawan Group. All rights reserved.</div>
+            </div>
           </div>
         </div>
       )}

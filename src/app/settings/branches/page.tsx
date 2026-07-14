@@ -3,7 +3,7 @@
 // Branch management, grouped by brand (สาขาแยกยี่ห้อ). branch_code links
 // fun_channel_config routing → keep codes short/stable (e.g. NPT, SLY).
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Plus, Pencil, Loader2, X, Trash2 } from "lucide-react";
 import { Card, Toggle, inputCls } from "@/components/ui";
 import { SettingsShell } from "@/components/SettingsShell";
@@ -28,12 +28,16 @@ export default function BranchesPage() {
   const load = () => fetch("/api/branches?all=1").then((r) => r.json()).then((d) => { setBrands(d.brands); setBranches(d.branches); });
   useEffect(() => { load(); }, []);
 
+  // Edit form sits at the bottom of a long branch list — scroll it into view
+  // on แก้ไข (same fix as /settings/users and /settings/teams).
+  const editFormRef = useRef<HTMLDivElement>(null);
   const startEdit = (b: BranchRow) => {
     setEditingId(b.branchId);
     setDraft({
       branchName: b.branchName, branchCode: b.branchCode ?? "", brandId: b.brandId ? String(b.brandId) : "",
       companyNameFull: b.companyNameFull ?? "", companyAddress: b.companyAddress ?? "",
     });
+    setTimeout(() => editFormRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 50);
   };
   const cancel = () => { setEditingId(null); setDraft(EMPTY); setError(null); };
 
@@ -144,6 +148,7 @@ export default function BranchesPage() {
         ))}
       </Card>
 
+      <div ref={editFormRef} className="scroll-mt-4" />
       <Card title={editingId === null ? "เพิ่มสาขา" : `แก้ไขสาขา #${editingId}`}>
         <div className="grid gap-3 md:grid-cols-3">
           <label className="block">

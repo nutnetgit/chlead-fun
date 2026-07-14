@@ -17,12 +17,42 @@ export const runtime = "nodejs";
  *   - Core question answered: how many MORE leads must be found in the rest
  *     of this month to hit the remaining booking target at the current
  *     conversion rate, vs how many leads are expected to arrive anyway.
- * Config in fun_settings runrate_config: { teamMonthlyTarget, perUser: {id: n} }.
+ *
+ * Targets restructured 2026-07-14 (real bug reported): perUser used to be
+ * ONE number per userId, brand-agnostic. A salesperson who sells two brands
+ * only had one combined target, so an admin/gm viewing without a brand
+ * filter would edit that ambiguous number and silently corrupt whichever
+ * brand's real figure it actually meant. Now every entry is keyed
+ * `${brandId}:${userId}` — a booking target IS a per-brand commitment. The
+ * old flat teamMonthlyTarget field is gone entirely: team target is now
+ * always DERIVED as the sum of the relevant perUser entries (per user req:
+ * "ผลรวมเป้าจอง มาจากเป้าจองเซลล์รายคนรวมกัน") — summing per-brand-keyed
+ * entries is safe with no double-counting, whether scoped to one brand or
+ * combined across every brand the viewer can see.
+ * Config in fun_settings runrate_config: { perUser: {"brandId:userId": n} }.
  */
 const DAY = 24 * 60 * 60 * 1000;
 const CONVERTED_STAGES = ["booking", "contract", "delivered", "won"] as const;
 
-type Cfg = { teamMonthlyTarget?: number; perUser?: Record<string, number> };
+type Cfg = { perUser?: Record<string, number> };
+
+// Sum of booking targets: team scope (ownerId=null) sums every entry that
+// matches the brand filter (or every entry at all if unfiltered — correct
+// because each entry already belongs to exactly one brand, so nothing is
+// double-counted); user scope sums that one user's entries across whichever
+// brand(s) match the filter (their single brand if they only sell one, or
+// their real combined total across brands if unfiltered).
+function sumTarget(perUser: Record<string, number>, ownerId: number | null, brandId: number | null): number | null {
+  let total = 0, any = false;
+  for (const [key, v] of Object.entries(perUser)) {
+    const [bIdStr, uIdStr] = key.split(":");
+    const bId = Number(bIdStr), uId = Number(uIdStr);
+    if (brandId !== null && bId !== brandId) continue;
+    if (ownerId !== null && uId !== ownerId) continue;
+    total += v; any = true;
+  }
+  return any ? total : null;
+}
 
 export async function GET(request: NextRequest) {
   const rq = await requireRole(["sales", "manager", "gm", "admin"]);
@@ -62,9 +92,7 @@ export async function GET(request: NextRequest) {
   const windowStart = new Date(now.getTime() - 90 * DAY);
 
   const cfg = ((await getSetting<Cfg>("runrate_config")) ?? {}) as Cfg;
-  const target = ownerId
-    ? Number(cfg.perUser?.[String(ownerId)]) || null
-    : Number(cfg.teamMonthlyTarget) || null;
+  const target = sumTarget(cfg.perUser ?? {}, ownerId, brandId);
 
   // Bookings this year via stage history (first time a lead hit 'booking').
   const bookingEvents = await prisma.leadStageHistory.findMany({
@@ -179,7 +207,7 @@ export async function GET(request: NextRequest) {
     scope: ownerId ? "user" : "team",
     brandId,
     leadTarget,
-    config: { target, teamMonthlyTarget: Number(cfg.teamMonthlyTarget) || null, perUser: cfg.perUser ?? {} },
+    config: { target, perUser: cfg.perUser ?? {} },
     month: {
       name: monthIdx + 1, daysElapsed: Math.floor(daysElapsed), daysLeft, daysInMonth,
       actualBookings: actualThisMonth, target, carryIn, neededThisMonth,
@@ -199,18 +227,39 @@ export async function GET(request: NextRequest) {
   });
 }
 
-// Save targets: { teamMonthlyTarget?, perUser?: {userId: n} }
+// Save targets. Body: { perUser: {"brandId:userId": bookingTarget} } — merges
+// into the existing config (doesn't replace unrelated brand/user entries a
+// different manager or a different brand-filtered save already set).
 export async function PUT(request: NextRequest) {
   const rq = await requireRole(["manager", "gm", "admin"]);
   if (!rq.ok) return rq.response;
 
   const b = (await request.json().catch(() => ({}))) as Cfg;
-  const cfg: Cfg = {
-    teamMonthlyTarget: Number(b.teamMonthlyTarget) > 0 ? Number(b.teamMonthlyTarget) : undefined,
-    perUser: typeof b.perUser === "object" && b.perUser ? Object.fromEntries(
-      Object.entries(b.perUser).filter(([, v]) => Number(v) > 0).map(([k, v]) => [k, Number(v)]),
-    ) : {},
-  };
-  await setSetting("runrate_config", cfg);
+  const incoming = typeof b.perUser === "object" && b.perUser ? b.perUser : {};
+
+  // A manager may only write entries for users within their own branches —
+  // mirrors the read-side branch scoping so a manager can't (accidentally or
+  // otherwise) set another branch's booking target via a crafted request.
+  let allowedUserIds: Set<number> | null = null;
+  if (rq.role === "manager") {
+    const allowedBranches = await managerAllowedBranchIds(rq.funUserId!);
+    const users = allowedBranches.length
+      ? await prisma.funUser.findMany({ where: { branchLinks: { some: { branchId: { in: allowedBranches } } } }, select: { userId: true } })
+      : [];
+    allowedUserIds = new Set(users.map((u) => u.userId));
+  }
+
+  const current = ((await getSetting<Cfg>("runrate_config")) ?? {}) as Cfg;
+  const nextPerUser = { ...(current.perUser ?? {}) };
+  for (const [key, v] of Object.entries(incoming)) {
+    const [bIdStr, uIdStr] = key.split(":");
+    const bId = Number(bIdStr), uId = Number(uIdStr);
+    if (!Number.isInteger(bId) || !Number.isInteger(uId)) continue;
+    if (allowedUserIds && !allowedUserIds.has(uId)) continue; // silently skip out-of-scope writes
+    const n = Number(v);
+    if (n > 0) nextPerUser[key] = n; else delete nextPerUser[key];
+  }
+
+  await setSetting("runrate_config", { perUser: nextPerUser });
   return NextResponse.json({ ok: true });
 }

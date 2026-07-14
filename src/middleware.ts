@@ -16,6 +16,7 @@ import { getToken } from "next-auth/jwt";
 // populate their pickers.
 const PUBLIC_PREFIXES = [
   "/login", "/pending", "/lead-form", "/liff",
+  "/terms", "/privacy", "/cookies", // legal pages — must be readable pre-login
   "/api/auth", "/api/public", "/api/webhooks", "/api/jobs",
   "/api/models", "/api/brands",
   "/_next", "/favicon",

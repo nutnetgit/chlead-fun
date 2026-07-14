@@ -8,6 +8,7 @@
 import { useState, Suspense } from "react";
 import { signIn } from "next-auth/react";
 import { useSearchParams } from "next/navigation";
+import Link from "next/link";
 import { Loader2, LogIn, Eye, EyeOff } from "lucide-react";
 
 function LoginForm() {
@@ -85,6 +86,12 @@ function LoginForm() {
       <p className="text-[.72rem] text-[var(--text-3)] text-center leading-relaxed">
         ครั้งแรก? กดปุ่มเดียวกัน — ระบบลงทะเบียนให้อัตโนมัติ แล้วรอผู้ดูแลอนุมัติ
       </p>
+      <div className="flex items-center justify-center gap-3 text-[10px] text-[var(--text-3)] pt-2">
+        <Link href="/terms" className="hover:underline">ข้อกำหนดการใช้งาน</Link>
+        <Link href="/privacy" className="hover:underline">ความเป็นส่วนตัว</Link>
+        <Link href="/cookies" className="hover:underline">คุกกี้</Link>
+      </div>
+      <p className="text-[10px] text-[var(--text-3)] text-center">© 2026 Ch.Erawan Group. All rights reserved.</p>
     </div>
   );
 }
