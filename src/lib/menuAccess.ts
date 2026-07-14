@@ -32,7 +32,12 @@ export const MENU_DEFS: { key: MenuKey; label: string; roles: string[] | null }[
   { key: "pool", label: "Lead Pool", roles: null },
   { key: "dashboard", label: "Dashboard ทีม", roles: ["manager", "gm", "admin"] },
   { key: "lead-center", label: "ศูนย์รวม Lead", roles: ["manager", "gm", "admin"] },
-  { key: "runrate", label: "Run Rate เป้าเดือน", roles: ["manager", "gm", "admin"] },
+  // Sales included (user req 2026-07-14 — this key had no "sales" at all, so
+  // the page/API's existing self-scoping for a sales viewer was unreachable:
+  // the menu item never showed and the sidebar's page gate blocked direct
+  // URL entry too. A sales user sees only their own numbers on this page;
+  // the "ตั้งเป้าจอง (ผจก.)" card stays manager+-only inside the page itself.
+  { key: "runrate", label: "Run Rate เป้าเดือน", roles: ["sales", "manager", "gm", "admin"] },
   { key: "events", label: "Event / บูธ", roles: ["manager", "gm", "admin"] },
   { key: "reports", label: "รายงาน", roles: ["manager", "gm", "admin"] },
   // Manager's slice of settings (user req 2026-07-12).

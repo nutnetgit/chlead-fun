@@ -42,6 +42,7 @@ export async function GET() {
         enteredReason: r.enteredReason,
         priority: r.priority,
         customerName: lead.person.nickname || lead.person.firstName,
+        brandId: lead.brandId,
         brand: lead.brand.brandName,
         branch: lead.branch.branchName,
         temperature: lead.temperature,

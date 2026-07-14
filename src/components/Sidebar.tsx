@@ -237,24 +237,30 @@ export function Sidebar({ role, me, onProfileSaved }: { role: string | null; me?
         <Logo mini={mini} />
         <NavList role={role} menus={me?.user?.menus ?? null} mini={mini} onToggleMini={toggleMini} />
         <div className="flex-1" />
-        {/* Build version marker (user req 2026-07-11) — visible confirmation
-            a deploy actually landed, instead of guessing from behavior. */}
-        {!mini && process.env.NEXT_PUBLIC_BUILD_VERSION && (
-          <div className="text-[10px] text-[var(--text-3)] px-1 select-none">v{process.env.NEXT_PUBLIC_BUILD_VERSION}</div>
-        )}
-        {/* Legal footer (user req 2026-07-14) — a SaaS handling customer PII
-            and running staff logins needs these three links reachable from
-            anywhere, not just buried in a settings page. */}
-        {!mini && (
-          <div className="px-1 space-y-1 select-none">
-            <div className="flex flex-wrap gap-x-2 gap-y-0.5 text-[9px] text-[var(--text-3)]">
-              <Link href="/terms" className="hover:underline hover:text-[var(--text-2)]">ข้อกำหนดการใช้งาน</Link>
-              <Link href="/privacy" className="hover:underline hover:text-[var(--text-2)]">ความเป็นส่วนตัว</Link>
-              <Link href="/cookies" className="hover:underline hover:text-[var(--text-2)]">คุกกี้</Link>
+        {/* Build version marker + legal footer grouped into ONE flex child
+            (bug fixed 2026-07-14: the aside's gap-5 was applying BETWEEN
+            them too since they were separate siblings, leaving the version
+            marker looking oddly detached above the legal links). */}
+        <div className="space-y-1.5">
+          {/* Build version marker (user req 2026-07-11) — visible confirmation
+              a deploy actually landed, instead of guessing from behavior. */}
+          {!mini && process.env.NEXT_PUBLIC_BUILD_VERSION && (
+            <div className="text-[10px] text-[var(--text-3)] px-1 select-none">v{process.env.NEXT_PUBLIC_BUILD_VERSION}</div>
+          )}
+          {/* Legal footer (user req 2026-07-14) — a SaaS handling customer PII
+              and running staff logins needs these three links reachable from
+              anywhere, not just buried in a settings page. */}
+          {!mini && (
+            <div className="px-1 space-y-1 select-none">
+              <div className="flex flex-wrap gap-x-2 gap-y-0.5 text-[9px] text-[var(--text-3)]">
+                <Link href="/terms" className="hover:underline hover:text-[var(--text-2)]">ข้อกำหนดการใช้งาน</Link>
+                <Link href="/privacy" className="hover:underline hover:text-[var(--text-2)]">ความเป็นส่วนตัว</Link>
+                <Link href="/cookies" className="hover:underline hover:text-[var(--text-2)]">คุกกี้</Link>
+              </div>
+              <div className="text-[9px] text-[var(--text-3)]">© 2026 Ch.Erawan Group. All rights reserved.</div>
             </div>
-            <div className="text-[9px] text-[var(--text-3)]">© 2026 Ch.Erawan Group. All rights reserved.</div>
-          </div>
-        )}
+          )}
+        </div>
       </aside>
 
       {/* mobile: hamburger + drawer */}
