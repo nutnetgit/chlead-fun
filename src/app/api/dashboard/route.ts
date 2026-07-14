@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { requireRole } from "@/lib/authz";
+import { requireRole, managerAllowedBranchIds } from "@/lib/authz";
 
 /**
  * Manager dashboard v2 (user req 2026-07-11, brainstormed layout): every
@@ -20,6 +20,21 @@ export async function GET() {
   const rq = await requireRole(["manager", "gm", "admin"]);
   if (!rq.ok) return rq.response;
 
+  // Branch scoping (bug found 2026-07-14: every query here was completely
+  // unscoped — a manager saw HOT-stale leads, SLA events, and scorecard
+  // numbers from brands/branches they don't manage at all, which is why the
+  // "HOT ค้างเกิน 7 วัน" count didn't reconcile with Lead Center's own list,
+  // itself already properly branch-scoped). admin/gm stay global; a manager
+  // with no branch links falls back to everything (same graceful rule used
+  // everywhere else in the app).
+  let branchScope: number[] | null = null;
+  if (rq.role === "manager") {
+    const allowed = await managerAllowedBranchIds(rq.funUserId!);
+    if (allowed.length) branchScope = allowed;
+  }
+  const leadBranchWhere = branchScope ? { branchId: { in: branchScope } } : {};
+  const leadRelBranchWhere = branchScope ? { lead: { branchId: { in: branchScope } } } : {};
+
   const now = new Date();
   const startToday = new Date(now); startToday.setHours(0, 0, 0, 0);
   const endOfToday = new Date(now); endOfToday.setHours(23, 59, 59, 999);
@@ -28,37 +43,40 @@ export async function GET() {
   const startMonth = new Date(now.getFullYear(), now.getMonth(), 1);
 
   const [
-    active, dueToday, byTemp, byStage, openBreaches, poolWaiting, conflicts, recentEvents,
-    pendingEscalations, staleHotLeads, oldestPool,
+    active, dueToday, byTemp, byStage, openBreaches, poolWaitingRows, conflicts, recentEvents,
+    pendingEscalations, staleHotLeads, poolAllWaiting,
     salespeople, activeLeads, activities7d, bookingsMonth, cohort90,
   ] = await Promise.all([
-    prisma.lead.count({ where: { status: "active" } }),
-    prisma.lead.count({ where: { status: "active", nextActionAt: { lte: endOfToday } } }),
-    prisma.lead.groupBy({ by: ["temperature"], where: { status: "active" }, _count: true }),
-    prisma.lead.groupBy({ by: ["stage"], where: { status: "active" }, _count: true }),
-    prisma.slaEvent.count({ where: { resolvedAt: null } }),
-    prisma.leadPool.count({ where: { claimedAt: null } }),
-    prisma.lead.count({ where: { status: "active", temperatureConflict: 1 } }),
+    prisma.lead.count({ where: { status: "active", ...leadBranchWhere } }),
+    prisma.lead.count({ where: { status: "active", nextActionAt: { lte: endOfToday }, ...leadBranchWhere } }),
+    prisma.lead.groupBy({ by: ["temperature"], where: { status: "active", ...leadBranchWhere }, _count: true }),
+    prisma.lead.groupBy({ by: ["stage"], where: { status: "active", ...leadBranchWhere }, _count: true }),
+    prisma.slaEvent.count({ where: { resolvedAt: null, ...leadRelBranchWhere } }),
+    // LeadPool has no Prisma relation to Lead (raw-SQL schema, mirrored as-is)
+    // — branch-scoping it needs a manual join, done below after this fetch.
+    prisma.leadPool.findMany({ where: { claimedAt: null }, orderBy: { enteredAt: "asc" } }),
+    prisma.lead.count({ where: { status: "active", temperatureConflict: 1, ...leadBranchWhere } }),
     prisma.slaEvent.findMany({
+      where: leadRelBranchWhere,
       orderBy: { eventId: "desc" }, take: 10,
       include: { lead: { include: { person: true, brand: true } } },
     }),
     // ── Action Zone ─────────────────────────────────────────────────────
     prisma.slaEvent.findMany({
-      where: { eventType: "idle_escalate", resolvedAt: null },
+      where: { eventType: "idle_escalate", resolvedAt: null, ...leadRelBranchWhere },
       orderBy: { detectedAt: "asc" }, take: 8,
       include: { lead: { include: { person: true, brand: true } } },
     }),
     prisma.lead.findMany({
-      where: { status: "active", temperature: "hot", lastActivityAt: { lt: d7 } },
+      where: { status: "active", temperature: "hot", lastActivityAt: { lt: d7 }, ...leadBranchWhere },
       orderBy: { lastActivityAt: "asc" }, take: 5,
       include: { person: true, brand: true },
     }),
-    prisma.leadPool.findFirst({ where: { claimedAt: null }, orderBy: { enteredAt: "asc" } }),
+    prisma.lead.findMany({ where: leadBranchWhere, select: { leadId: true } }),
     // ── Scorecard raw data (aggregated in JS — team sizes are small) ─────
-    prisma.funUser.findMany({ where: { isActive: 1, role: "sales" } }),
+    prisma.funUser.findMany({ where: { isActive: 1, role: "sales", ...(branchScope ? { branchId: { in: branchScope } } : {}) } }),
     prisma.lead.findMany({
-      where: { status: "active", ownerUserId: { not: null } },
+      where: { status: "active", ownerUserId: { not: null }, ...leadBranchWhere },
       select: { ownerUserId: true, nextActionAt: true, createdAt: true, firstResponseAt: true },
     }),
     prisma.activity.groupBy({
@@ -67,14 +85,21 @@ export async function GET() {
       _count: true,
     }),
     prisma.leadStageHistory.findMany({
-      where: { toStage: "booking", changedAt: { gte: startMonth } },
+      where: { toStage: "booking", changedAt: { gte: startMonth }, ...leadRelBranchWhere },
       include: { lead: { select: { ownerUserId: true } } },
     }),
     prisma.lead.findMany({
-      where: { createdAt: { gte: d90 }, ownerUserId: { not: null } },
+      where: { createdAt: { gte: d90 }, ownerUserId: { not: null }, ...leadBranchWhere },
       select: { ownerUserId: true, stage: true, createdAt: true, firstResponseAt: true },
     }),
   ]);
+
+  // Manual branch-scope join for the pool (see comment above) — a branch-
+  // scoped manager only counts/sees pool leads that were actually in their
+  // own branches before they got forfeited.
+  const scopedPoolLeadIds = new Set(poolAllWaiting.map((l) => Number(l.leadId)));
+  const poolWaiting = branchScope ? poolWaitingRows.filter((p) => scopedPoolLeadIds.has(Number(p.leadId))) : poolWaitingRows;
+  const oldestPool = poolWaiting[0] ?? null;
 
   // ── unanswered chats: latest message per lead is inbound ───────────────
   const latestChat = await prisma.chatMessage.findMany({
@@ -90,10 +115,19 @@ export async function GET() {
     seen.add(key);
     if (m.direction === "inbound") unansweredChats.push({ leadId: Number(m.leadId), waitingSince: m.createdAt });
   }
-  const unansweredDetail = unansweredChats.length ? await prisma.lead.findMany({
-    where: { leadId: { in: unansweredChats.slice(0, 5).map((u) => BigInt(u.leadId)) } },
+  // Branch-scope BEFORE taking top 5 / counting the total — otherwise a
+  // manager's badge count and list would include other branches' chats too
+  // (same class of bug just fixed for staleHot/pool/SLA events above).
+  const unansweredScopedLeads = unansweredChats.length ? await prisma.lead.findMany({
+    where: { leadId: { in: unansweredChats.map((u) => BigInt(u.leadId)) }, ...leadBranchWhere },
     include: { person: true, brand: true },
   }) : [];
+  const scopedUnansweredLeadIds = new Set(unansweredScopedLeads.map((l) => Number(l.leadId)));
+  const unansweredChatsScoped = unansweredChats.filter((u) => scopedUnansweredLeadIds.has(u.leadId));
+  const unansweredDetail = unansweredScopedLeads
+    .sort((a, b) => Number(a.leadId) - Number(b.leadId)) // stable order, waitingSince applied below
+    .filter((l) => unansweredChatsScoped.some((u) => u.leadId === Number(l.leadId)))
+    .slice(0, 5);
   const ownerIds = [...new Set(unansweredDetail.map((l) => l.ownerUserId).filter((x): x is number => x !== null))];
   const ownersForChats = ownerIds.length ? await prisma.funUser.findMany({ where: { userId: { in: ownerIds } } }) : [];
   const ownerName = new Map(ownersForChats.map((u) => [u.userId, u.nickname || u.displayName]));
@@ -127,7 +161,7 @@ export async function GET() {
   const daysAgo = (d: Date | null) => d ? Math.floor((now.getTime() - d.getTime()) / DAY) : null;
 
   return NextResponse.json({
-    active, dueToday, openBreaches, poolWaiting, conflicts,
+    active, dueToday, openBreaches, poolWaiting: poolWaiting.length, conflicts,
     byTemperature: Object.fromEntries(byTemp.map((t) => [t.temperature ?? "unscored", t._count])),
     byStage: Object.fromEntries(byStage.map((s) => [s.stage, s._count])),
     recentEvents: recentEvents.map((e) => ({
@@ -153,9 +187,9 @@ export async function GET() {
         brand: l.brand.brandName,
         daysIdle: daysAgo(l.lastActivityAt),
       })),
-      pool: { waiting: poolWaiting, oldestDays: daysAgo(oldestPool?.enteredAt ?? null) },
+      pool: { waiting: poolWaiting.length, oldestDays: daysAgo(oldestPool?.enteredAt ?? null) },
       unansweredChats: unansweredDetail.map((l) => {
-        const u = unansweredChats.find((x) => x.leadId === Number(l.leadId));
+        const u = unansweredChatsScoped.find((x) => x.leadId === Number(l.leadId));
         return {
           leadId: Number(l.leadId),
           customerName: custName(l),
@@ -164,7 +198,7 @@ export async function GET() {
           hoursWaiting: u?.waitingSince ? Math.round((now.getTime() - u.waitingSince.getTime()) / 3600000) : null,
         };
       }),
-      unansweredTotal: unansweredChats.length,
+      unansweredTotal: unansweredChatsScoped.length,
     },
     scorecard,
   });

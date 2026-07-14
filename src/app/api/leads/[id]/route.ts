@@ -44,6 +44,7 @@ export async function GET(_request: NextRequest, { params }: Ctx) {
     brand: lead.brand.brandName,
     brandId: lead.brandId,
     branch: lead.branch.branchName,
+    branchId: lead.branchId,
     channel: lead.channel.channelName,
     modelInterest: lead.interestedVariant,
     color: lead.interestedColor,
@@ -53,10 +54,12 @@ export async function GET(_request: NextRequest, { params }: Ctx) {
     buyTimeframe: lead.buyTimeframe,
     hasTradein: !!lead.hasTradein,
     stage: lead.stage,
+    status: lead.status,
     temperature: lead.temperature,
     temperatureConflict: !!lead.temperatureConflict,
     aiScore: lead.aiScore,
     aiScoreReason: lead.aiScoreReason,
+    ownerUserId: lead.ownerUserId,
     ownerName: owner?.displayName ?? null,
     daysIdle: Math.floor((Date.now() - (lead.lastActivityAt ?? lead.createdAt ?? new Date()).getTime()) / DAY),
     nextActionAt: lead.nextActionAt,
@@ -82,17 +85,17 @@ export async function GET(_request: NextRequest, { params }: Ctx) {
   });
 }
 
-// Stage / temperature / archive updates from the workspace.
-// Body: { stage?, temperature?, archived? }. Stage changes are logged
-// append-only to fun_lead_stage_history. Archive is a soft-archive toggle
-// (CATS candidate parity) — never deletes the row, just hides it from the
-// default working views; a manager can un-archive at any time.
+// Stage / temperature / archive / owner updates from the workspace.
+// Body: { stage?, temperature?, archived?, ownerUserId? }. Stage changes are
+// logged append-only to fun_lead_stage_history. Archive is a soft-archive
+// toggle (CATS candidate parity) — never deletes the row, just hides it from
+// the default working views; a manager can un-archive at any time.
 export async function PATCH(request: NextRequest, { params }: Ctx) {
   const { id } = await params;
   const leadId = BigInt(id || "0");
   const access = await requireLeadAccess(leadId);
   if (!access.ok) return access.response;
-  const body = (await request.json().catch(() => ({}))) as { stage?: string; temperature?: string; archived?: boolean; changedBy?: number };
+  const body = (await request.json().catch(() => ({}))) as { stage?: string; temperature?: string; archived?: boolean; changedBy?: number; ownerUserId?: number };
 
   const lead = access.lead;
 
@@ -114,6 +117,18 @@ export async function PATCH(request: NextRequest, { params }: Ctx) {
     data.temperature = body.temperature;
     data.temperatureConflict = 0;
   }
+  // Manager reassigning ownership (user req 2026-07-14: Lead Center was
+  // effectively read-only for managers — no way to act on a lead the way a
+  // salesperson could). Only manager+ may reassign (sales's own PATCH scope
+  // is already limited to their own leads via requireLeadAccess, so a sales
+  // caller sending ownerUserId here would just be reassigning their own
+  // lead to themselves at best — harmless — but we still gate it explicitly
+  // to avoid a sales user handing their lead to someone else unsupervised).
+  if (typeof body.ownerUserId === "number" && access.role !== "sales") {
+    const target = await prisma.funUser.findUnique({ where: { userId: body.ownerUserId } });
+    if (!target || target.isActive !== 1) return NextResponse.json({ error: "ไม่พบผู้ใช้ปลายทาง" }, { status: 400 });
+    data.ownerUserId = body.ownerUserId;
+  }
   if (Object.keys(data).length === 0) return NextResponse.json({ error: "nothing to update" }, { status: 400 });
 
   await prisma.lead.update({ where: { leadId }, data });
@@ -121,6 +136,11 @@ export async function PATCH(request: NextRequest, { params }: Ctx) {
     await prisma.leadStageHistory.create({
       data: { leadId, fromStage: lead.stage, toStage: String(data.stage), changedBy: body.changedBy ?? null },
     });
+  }
+  if (typeof data.ownerUserId === "number" && data.ownerUserId !== lead.ownerUserId) {
+    await prisma.assignmentHistory.create({
+      data: { leadId, fromUserId: lead.ownerUserId, toUserId: data.ownerUserId, reason: "manager_reassign", assignedBy: access.funUserId },
+    }).catch(() => {});
   }
   return NextResponse.json({ ok: true });
 }

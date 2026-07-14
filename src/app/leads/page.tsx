@@ -7,7 +7,7 @@
 // header — "มองเห็นได้ทุกที่ที่การ์ด lead แสดง".
 
 import { useEffect, useState, useCallback, useMemo } from "react";
-import { AlertTriangle, Copy, Check, Loader2, X, Plus, QrCode, Calendar, LayoutList, KanbanSquare, FileText } from "lucide-react";
+import { AlertTriangle, Copy, Check, Loader2, X, Plus, QrCode, Calendar, LayoutList, KanbanSquare, FileText, Search } from "lucide-react";
 import { AddLeadModal } from "@/components/AddLeadModal";
 import { QrLeadModal } from "@/components/QrLeadModal";
 import { KanbanBoard } from "@/components/KanbanBoard";
@@ -72,6 +72,9 @@ export default function LeadsPage() {
   const [calOpen, setCalOpen] = useState(false);
   const [view, setView] = useState<"kanban" | "list">("kanban");
   const [cardFilter, setCardFilter] = useState<"all" | "today" | "overdue" | "conflict">("all");
+  // Search box (user req 2026-07-14: long "ลูกค้าของฉัน" lists were hard to
+  // find anyone in) — client-side, same pattern as the stat-card filters.
+  const [search, setSearch] = useState("");
   const [aira, setAira] = useState<{ loading: boolean; lines: string[] | null; error: string | null }>({ loading: false, lines: null, error: null });
   const [brandFilter, setBrandFilter] = useState<string>("");
   const [switchOpen, setSwitchOpen] = useState(false);
@@ -164,7 +167,9 @@ export default function LeadsPage() {
 
   // Stat cards filter the list view (user req 2026-07-10) — client-side
   // subset of whatever `rows` already loaded, not a new API call.
+  const q = search.trim().toLowerCase();
   const cardFilterRows = brandRows.filter((r) => {
+    if (q && !(r.customerName.toLowerCase().includes(q) || r.branch.toLowerCase().includes(q) || (r.modelInterest ?? "").toLowerCase().includes(q))) return false;
     if (cardFilter === "today") return dueLabel(r).text === "ตามวันนี้";
     if (cardFilter === "overdue") return r.nextActionAt && new Date(r.nextActionAt) < new Date(new Date().setHours(0, 0, 0, 0));
     if (cardFilter === "conflict") return r.temperatureConflict;
@@ -259,6 +264,13 @@ export default function LeadsPage() {
               ))}
             </div>
           </div>
+          <div className="px-5 py-3 border-b border-[var(--border)]">
+            <div className="relative">
+              <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-[var(--text-3)]" />
+              <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="ค้นหาชื่อ/สาขา/รุ่นรถ…"
+                className="w-full pl-8 pr-3 py-1.5 text-[.82rem] bg-[var(--bg)] border border-[var(--border-2)] rounded-lg focus:outline-none focus:ring-1 focus:ring-[var(--primary)] focus:bg-white transition" />
+            </div>
+          </div>
           {rows === null ? (
             <p className="p-5 text-sm text-[var(--text-2)]">Loading…</p>
           ) : cardFilterRows.length === 0 ? (
@@ -291,7 +303,12 @@ export default function LeadsPage() {
         </div>
 
         {/* ── detail panel ── */}
-        <div className="bg-white border border-[var(--border)] rounded-2xl shadow-[var(--shadow)] overflow-hidden self-start">
+        {/* Sticky (user req 2026-07-14: with a long "ลูกค้าของฉัน" list,
+            picking a customer showed their detail at the TOP of the page,
+            forcing a scroll-up every time) — stays pinned near the viewport
+            top as the list scrolls past it; own scrollbar kicks in only if
+            the panel's content itself is taller than the viewport. */}
+        <div className="bg-white border border-[var(--border)] rounded-2xl shadow-[var(--shadow)] overflow-y-auto self-start sticky top-4 max-h-[calc(100vh-2rem)]">
           {!detail ? (
             <p className="p-5 text-sm text-[var(--text-2)]">เลือกลูกค้าจากรายการซ้ายเพื่อดูรายละเอียด</p>
           ) : (
@@ -406,6 +423,23 @@ export default function LeadsPage() {
                     ตั้งเป็น {t.toUpperCase()}
                   </button>
                 ))}
+                {/* จอง (user req 2026-07-14): placeholder for now — just
+                    flips stage to "booking", same as dragging the card to
+                    the จองแล้ว kanban column. Once SPS integration lands,
+                    this button becomes "เพิ่ม booking ใน SPS" (opens SPS in
+                    a new tab, pre-filled with name/phone, user finishes the
+                    rest there) — deliberately NOT built yet, waiting on SPS. */}
+                {detail.stage !== "booking" && detail.stage !== "lost" && detail.stage !== "forfeited" && (
+                  <button
+                    onClick={async () => {
+                      if (!confirm(`เปลี่ยนสถานะ "${detail.fullName || detail.customerName}" เป็น "จองแล้ว"?`)) return;
+                      await fetch(`/api/leads/${detail.leadId}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ stage: "booking" }) });
+                      loadDetail(detail.leadId); loadList();
+                    }}
+                    className="px-4 py-2 rounded-[9px] text-[.8rem] font-medium border border-[var(--green)] text-[var(--green)] bg-[var(--green-soft)] hover:brightness-95 transition">
+                    🎉 จอง
+                  </button>
+                )}
                 <button onClick={openSwitch}
                   className="px-4 py-2 rounded-[9px] text-[.8rem] border border-[var(--amber)] text-[var(--amber)] bg-[var(--amber-soft)] hover:brightness-95 transition">
                   🔁 ย้ายยี่ห้อ

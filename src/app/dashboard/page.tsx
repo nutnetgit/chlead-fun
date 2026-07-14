@@ -75,6 +75,12 @@ export default function DashboardPage() {
       <div>
         <h1 className="text-[1.7rem]">Dashboard ทีมขาย</h1>
         <p className="text-[var(--text-2)] text-[.95rem]">สิ่งที่ต้องจัดการวันนี้ · ผลงานรายเซลส์ · สุขภาพ pipeline</p>
+        {/* SLA explainer (user req 2026-07-14: "อยากให้มีการอธิบายคำว่า SLA
+            ตรงไหนสักที่") — plain-language, once, near the top of the page
+            that uses the term the most. */}
+        <p className="text-[.76rem] text-[var(--text-3)] bg-[var(--bg)] rounded-lg px-3 py-2 mt-2 max-w-2xl">
+          💡 <b>SLA</b> (Service Level Agreement) = เกณฑ์เวลาที่ระบบตั้งไว้ว่าเซลส์ต้องติดต่อ/ติดตามลูกค้าภายในกี่วัน — ถ้าเงียบเกินเวลานี้ ระบบจะเตือนเซลส์ก่อน แล้วแจ้งผจก.ถ้ายังเงียบต่อ จนสุดท้ายจะ&quot;ริบ&quot;กลับเข้า Lead Pool ให้คนอื่นรับต่อ (เปิด/ปิดระบบนี้ได้ที่ /settings/automation)
+        </p>
       </div>
 
       {/* ── ① Action Zone ─────────────────────────────────────────────── */}
@@ -85,9 +91,16 @@ export default function DashboardPage() {
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
           {az!.escalations.length > 0 && (
             <div className="bg-white border-2 border-[var(--red)] rounded-2xl shadow-[var(--shadow)] overflow-hidden">
-              <div className="px-4 py-3 bg-[var(--red-soft)] flex items-center gap-2">
-                <AlertOctagon size={16} className="text-[var(--red)]" />
-                <h3 className="text-[.9rem] font-semibold text-[var(--red)]">รอ ผจก. ตัดสินใจ ({az!.escalations.length})</h3>
+              <div className="px-4 py-3 bg-[var(--red-soft)]">
+                <div className="flex items-center gap-2">
+                  <AlertOctagon size={16} className="text-[var(--red)]" />
+                  <h3 className="text-[.9rem] font-semibold text-[var(--red)]">รอ ผจก. ตัดสินใจ ({az!.escalations.length})</h3>
+                </div>
+                {/* Data-source + "ยกเว้น" explainer (user req 2026-07-14: "ตารางนี้
+                    ข้อมูลมายังไง แล้วปุ่มยกเว้นไว้ทำอะไร") */}
+                <p className="text-[.7rem] text-[var(--red)]/80 mt-1">
+                  Lead ที่เซลส์เงียบเกินเวลา SLA แล้วถูกแจ้งมาให้ผจก.ตัดสินใจ — &quot;เตือนอีกครั้ง&quot; ส่งเตือนเซลส์ซ้ำ, &quot;ย้ายเข้า pool&quot; ริบออกจากเซลส์คนนี้ทันที, &quot;ยกเว้น&quot; ไม่ใช่การปล่อยผ่านเฉยๆ แต่ต้องระบุเหตุผลก่อนถึงจะปิดเคสนี้ได้ (เช่น ลูกค้าขอเวลาคิดเพิ่ม)
+                </p>
               </div>
               {az!.escalations.map((e) => (
                 <div key={e.leadId} className="px-4 py-2.5 border-b border-[var(--border)] last:border-0 flex items-center gap-2 flex-wrap text-[.82rem]">
@@ -136,9 +149,14 @@ export default function DashboardPage() {
 
           {az!.staleHot.length > 0 && (
             <div className="bg-white border border-[var(--border)] rounded-2xl shadow-[var(--shadow)] overflow-hidden">
-              <div className="px-4 py-3 border-b border-[var(--border)] flex items-center gap-2">
-                <Flame size={16} className="text-[var(--red)]" />
-                <h3 className="text-[.9rem] font-semibold">HOT ค้างเกิน 7 วัน ({az!.staleHot.length})</h3>
+              <div className="px-4 py-3 border-b border-[var(--border)]">
+                <div className="flex items-center gap-2">
+                  <Flame size={16} className="text-[var(--red)]" />
+                  <h3 className="text-[.9rem] font-semibold">HOT ค้างเกิน 7 วัน ({az!.staleHot.length})</h3>
+                </div>
+                <p className="text-[.7rem] text-[var(--text-3)] mt-1">
+                  Lead ที่ยังตั้งอุณหภูมิ HOT อยู่ แต่ไม่มีการติดต่อ (activity) มาแล้วเกิน 7 วัน — แสดงสูงสุด 5 รายการที่เงียบนานที่สุดก่อน
+                </p>
               </div>
               {az!.staleHot.map((l) => (
                 <Link key={l.leadId} href={`/lead-center`} className="px-4 py-2.5 border-b border-[var(--border)] last:border-0 flex items-center gap-2 text-[.82rem] hover:bg-[var(--surface-2)] transition">
@@ -258,9 +276,14 @@ export default function DashboardPage() {
         </div>
 
         <div className="bg-white border border-[var(--border)] rounded-2xl shadow-[var(--shadow)] overflow-hidden">
-          <div className="px-5 py-4 border-b border-[var(--border)] flex items-center justify-between">
-            <h3 className="text-base">เหตุการณ์ SLA ล่าสุด</h3>
-            <Link href="/pool" className="text-[.76rem] text-[var(--accent-text)] hover:underline">ไปที่ Lead Pool →</Link>
+          <div className="px-5 py-4 border-b border-[var(--border)]">
+            <div className="flex items-center justify-between">
+              <h3 className="text-base">เหตุการณ์ SLA ล่าสุด</h3>
+              <Link href="/pool" className="text-[.76rem] text-[var(--accent-text)] hover:underline">ไปที่ Lead Pool →</Link>
+            </div>
+            <p className="text-[.72rem] text-[var(--text-3)] mt-1">
+              Log อัตโนมัติจากระบบตรวจ SLA ที่ทำงานทุกชั่วโมง — 10 เหตุการณ์ล่าสุด (เตือนเซลส์/แจ้งผจก./ริบเข้า pool/ไม่ตอบลูกค้าใหม่ทันเวลา) จุดเขียว = จัดการแล้ว จุดแดง = ยังไม่จัดการ
+            </p>
           </div>
           {!d ? <p className="p-5 text-sm text-[var(--text-2)]">Loading…</p> :
             d.recentEvents.length === 0 ? <p className="p-5 text-sm text-[var(--text-2)]">ยังไม่มีเหตุการณ์ SLA 🎉</p> : (

@@ -4,7 +4,7 @@
 // responsible salesperson: per-person workload summary + filterable table.
 
 import { useEffect, useMemo, useState } from "react";
-import { AlertTriangle, ChevronLeft, ChevronRight, ChevronUp, ChevronDown, ChevronsUpDown } from "lucide-react";
+import { AlertTriangle, ChevronLeft, ChevronRight, ChevronUp, ChevronDown, ChevronsUpDown, Search } from "lucide-react";
 import { ContactPanel } from "@/components/ContactPanel";
 
 const PER_PAGE = 20;
@@ -80,7 +80,10 @@ export default function LeadCenterPage() {
   const [showArchived, setShowArchived] = useState(false);
   const [brandFilter, setBrandFilter] = useState<string>("");
   const [sort, setSort] = useState<{ key: SortKey; dir: 1 | -1 } | null>(null);
-  useEffect(() => { setPage(1); }, [ownerFilter, showArchived, brandFilter, sort]);
+  // Search box (user req 2026-07-14: long lists were hard to find anyone in
+  // without paging through) — matches name, brand/model, or branch.
+  const [search, setSearch] = useState("");
+  useEffect(() => { setPage(1); }, [ownerFilter, showArchived, brandFilter, sort, search]);
 
   // Click a header: 1st = ascending, 2nd = descending, 3rd = back to default.
   const onSort = (k: SortKey) => setSort((s) => s?.key !== k ? { key: k, dir: 1 } : s.dir === 1 ? { key: k, dir: -1 } : null);
@@ -112,9 +115,11 @@ export default function LeadCenterPage() {
   // more than one brand — a single-brand viewer never sees an empty filter bar.
   const brands = useMemo(() => [...new Set((rows ?? []).map((r) => r.brand))].sort(), [rows]);
 
+  const q = search.trim().toLowerCase();
   const filtered = (rows ?? []).filter((r) =>
     (!ownerFilter || (ownerFilter === "none" ? r.ownerUserId === null : String(r.ownerUserId) === ownerFilter)) &&
-    (!brandFilter || r.brand === brandFilter));
+    (!brandFilter || r.brand === brandFilter) &&
+    (!q || r.customerName.toLowerCase().includes(q) || r.branch.toLowerCase().includes(q) || (r.modelInterest ?? "").toLowerCase().includes(q)));
   if (sort) {
     const val = SORT_VAL[sort.key];
     filtered.sort((a, b) => {
@@ -173,7 +178,14 @@ export default function LeadCenterPage() {
       <ContactPanel leadId={selected} onClose={() => setSelected(null)} onArchiveChange={load} />
       <div className="bg-white border border-[var(--border)] rounded-2xl shadow-[var(--shadow)] overflow-hidden">
         <div className="px-5 py-4 border-b border-[var(--border)] flex items-center justify-between gap-3 flex-wrap">
-          <h3 className="text-base">{ownerFilter ? `Lead ของ ${owners.find(([k]) => k === ownerFilter)?.[1].name ?? ""}` : "Lead ทั้งหมด"} ({filtered.length})</h3>
+          <div className="flex items-center gap-3 min-w-0">
+            <h3 className="text-base shrink-0">{ownerFilter ? `Lead ของ ${owners.find(([k]) => k === ownerFilter)?.[1].name ?? ""}` : "Lead ทั้งหมด"} ({filtered.length})</h3>
+            <div className="relative">
+              <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-[var(--text-3)]" />
+              <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="ค้นหาชื่อ/สาขา/รุ่นรถ…"
+                className="pl-8 pr-3 py-1.5 text-[.8rem] bg-[var(--bg)] border border-[var(--border-2)] rounded-lg w-48 focus:outline-none focus:ring-1 focus:ring-[var(--primary)] focus:bg-white transition" />
+            </div>
+          </div>
           <div className="flex items-center gap-3">
             {ownerFilter && <button onClick={() => setOwnerFilter("")} className="text-[.76rem] text-[var(--accent-text)] hover:underline">ล้างตัวกรอง</button>}
             <Pager page={page} setPage={setPage} total={filtered.length} />
