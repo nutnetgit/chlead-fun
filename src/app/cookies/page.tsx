@@ -5,10 +5,6 @@ export const metadata = { title: "นโยบายคุกกี้ — Ch.Le
 export default function CookiesPage() {
   return (
     <LegalPage title="นโยบายการใช้คุกกี้ (Cookie Policy)" updatedAt="14 กรกฎาคม 2569">
-      <p className="text-[.78rem] text-[var(--amber)] bg-[var(--amber-soft)] rounded-lg px-3 py-2">
-        เอกสารฉบับนี้เป็นร่างเบื้องต้น อธิบายตามการใช้งานคุกกี้จริงของระบบ ณ วันที่จัดทำ ไม่ถือเป็นคำแนะนำทางกฎหมาย
-      </p>
-
       <p>
         ระบบ Ch.Lead FUN ใช้คุกกี้ (cookies) ในขอบเขตจำกัดเท่าที่จำเป็นต่อการทำงานของระบบเท่านั้น ไม่ได้ใช้เพื่อการติดตามพฤติกรรม
         โฆษณา หรือวิเคราะห์การตลาดจากบุคคลภายนอกแต่อย่างใด

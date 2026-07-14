@@ -144,21 +144,32 @@ export default function DashboardPage() {
       {actionMsg && (
         <div className="bg-[var(--green-soft)] border border-[var(--green)] rounded-xl px-4 py-2.5 text-[.82rem]">{actionMsg}</div>
       )}
-      {!d ? <p className="text-sm text-[var(--text-2)]">Loading…</p> : hasActions ? (
+      {!d ? <p className="text-sm text-[var(--text-2)]">Loading…</p> : (
+      <>
+        {!hasActions && (
+          <div className="bg-[var(--green-soft)] border border-[var(--green)] rounded-2xl px-5 py-4 text-[.9rem]">
+            ✅ ไม่มีเรื่องค้างต้องจัดการ — ทีมตามงานครบ
+          </div>
+        )}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-          {az!.escalations.length > 0 && (
-            <div className="bg-white border-2 border-[var(--red)] rounded-2xl shadow-[var(--shadow)] overflow-hidden">
-              <div className="px-4 py-3 bg-[var(--red-soft)]">
-                <div className="flex items-center gap-2">
-                  <AlertOctagon size={16} className="text-[var(--red)]" />
-                  <h3 className="text-[.9rem] font-semibold text-[var(--red)]">รอ ผจก. ตัดสินใจ ({az!.escalations.length})</h3>
-                  {/* Data-source + "ยกเว้น" explainer (user req 2026-07-14:
-                      "ตารางนี้ข้อมูลมายังไง แล้วปุ่มยกเว้นไว้ทำอะไร") — hover
-                      tip, not an always-visible paragraph, since 2026-07-14. */}
-                  <InfoTip text={'Lead ที่เซลส์เงียบเกินเวลา SLA แล้วถูกแจ้งมาให้ผจก.ตัดสินใจ — "เตือนอีกครั้ง" ส่งเตือนเซลส์ซ้ำ, "ย้ายเข้า pool" ริบออกจากเซลส์คนนี้ทันที, "ยกเว้น" ไม่ใช่การปล่อยผ่านเฉยๆ แต่ต้องระบุเหตุผลก่อนถึงจะปิดเคสนี้ได้ (เช่น ลูกค้าขอเวลาคิดเพิ่ม)'} />
-                </div>
+          {/* Always shown, even with 0 items (user req 2026-07-14: this card
+              used to disappear entirely when empty, which read as "did the
+              page break?" rather than "nothing pending" — header stays,
+              styling de-emphasizes to neutral when there's nothing to flag). */}
+          <div className={`bg-white rounded-2xl shadow-[var(--shadow)] overflow-hidden ${az!.escalations.length > 0 ? "border-2 border-[var(--red)]" : "border border-[var(--border)]"}`}>
+            <div className={az!.escalations.length > 0 ? "px-4 py-3 bg-[var(--red-soft)]" : "px-4 py-3 border-b border-[var(--border)]"}>
+              <div className="flex items-center gap-2">
+                <AlertOctagon size={16} className={az!.escalations.length > 0 ? "text-[var(--red)]" : "text-[var(--text-3)]"} />
+                <h3 className={`text-[.9rem] font-semibold ${az!.escalations.length > 0 ? "text-[var(--red)]" : ""}`}>รอ ผจก. ตัดสินใจ ({az!.escalations.length})</h3>
+                {/* Data-source + "ยกเว้น" explainer (user req 2026-07-14:
+                    "ตารางนี้ข้อมูลมายังไง แล้วปุ่มยกเว้นไว้ทำอะไร") — hover
+                    tip, not an always-visible paragraph, since 2026-07-14. */}
+                <InfoTip text={'Lead ที่เซลส์เงียบเกินเวลา SLA แล้วถูกแจ้งมาให้ผจก.ตัดสินใจ — "เตือนอีกครั้ง" ส่งเตือนเซลส์ซ้ำ, "ย้ายเข้า pool" ริบออกจากเซลส์คนนี้ทันที, "ยกเว้น" ไม่ใช่การปล่อยผ่านเฉยๆ แต่ต้องระบุเหตุผลก่อนถึงจะปิดเคสนี้ได้ (เช่น ลูกค้าขอเวลาคิดเพิ่ม)'} />
               </div>
-              {az!.escalations.map((e) => (
+            </div>
+            {az!.escalations.length === 0 ? (
+              <p className="px-4 py-3 text-[.8rem] text-[var(--text-3)]">ไม่มีรายการรอตัดสินใจตอนนี้</p>
+            ) : az!.escalations.map((e) => (
                 <div key={e.leadId} className="px-4 py-2.5 border-b border-[var(--border)] last:border-0 flex items-center gap-2 flex-wrap text-[.82rem]">
                   <div className="flex-1 min-w-0">
                     <span className="font-medium">{e.customerName}</span>
@@ -180,8 +191,7 @@ export default function DashboardPage() {
                   </div>
                 </div>
               ))}
-            </div>
-          )}
+          </div>
 
           {az!.unansweredTotal > 0 && (
             <div className="bg-white border-2 border-[var(--amber)] rounded-2xl shadow-[var(--shadow)] overflow-hidden">
@@ -203,16 +213,19 @@ export default function DashboardPage() {
             </div>
           )}
 
-          {az!.staleHot.length > 0 && (
-            <div className="bg-white border border-[var(--border)] rounded-2xl shadow-[var(--shadow)] overflow-hidden">
-              <div className="px-4 py-3 border-b border-[var(--border)]">
-                <div className="flex items-center gap-2">
-                  <Flame size={16} className="text-[var(--red)]" />
-                  <h3 className="text-[.9rem] font-semibold">HOT ค้างเกิน 7 วัน ({az!.staleHot.length})</h3>
-                  <InfoTip text="Lead ที่ยังตั้งอุณหภูมิ HOT อยู่ แต่ไม่มีการติดต่อ (activity) มาแล้วเกิน 7 วัน — แสดงสูงสุด 5 รายการที่เงียบนานที่สุดก่อน" />
-                </div>
+          {/* Always shown, even with 0 items — same reasoning as the
+              escalations card above (user req 2026-07-14). */}
+          <div className="bg-white border border-[var(--border)] rounded-2xl shadow-[var(--shadow)] overflow-hidden">
+            <div className="px-4 py-3 border-b border-[var(--border)]">
+              <div className="flex items-center gap-2">
+                <Flame size={16} className={az!.staleHot.length > 0 ? "text-[var(--red)]" : "text-[var(--text-3)]"} />
+                <h3 className="text-[.9rem] font-semibold">HOT ค้างเกิน 7 วัน ({az!.staleHot.length})</h3>
+                <InfoTip text="Lead ที่ยังตั้งอุณหภูมิ HOT อยู่ แต่ไม่มีการติดต่อ (activity) มาแล้วเกิน 7 วัน — แสดงสูงสุด 5 รายการที่เงียบนานที่สุดก่อน" />
               </div>
-              {az!.staleHot.map((l) => (
+            </div>
+            {az!.staleHot.length === 0 ? (
+              <p className="px-4 py-3 text-[.8rem] text-[var(--text-3)]">ไม่มี Lead HOT ที่ค้างเกิน 7 วันตอนนี้</p>
+            ) : az!.staleHot.map((l) => (
                 <Link key={l.leadId} href={`/lead-center`} className="px-4 py-2.5 border-b border-[var(--border)] last:border-0 flex items-center gap-2 text-[.82rem] hover:bg-[var(--surface-2)] transition">
                   <div className="flex-1 min-w-0">
                     <span className="font-medium">{l.customerName}</span>
@@ -221,8 +234,7 @@ export default function DashboardPage() {
                   <span className="text-[.72rem] text-[var(--red)] font-medium shrink-0">เงียบ {l.daysIdle} วัน</span>
                 </Link>
               ))}
-            </div>
-          )}
+          </div>
 
           {az!.pool.waiting > 0 && (
             <div className="bg-white border border-[var(--border)] rounded-2xl shadow-[var(--shadow)] p-4 flex items-center gap-3">
@@ -239,10 +251,7 @@ export default function DashboardPage() {
             </div>
           )}
         </div>
-      ) : (
-        <div className="bg-[var(--green-soft)] border border-[var(--green)] rounded-2xl px-5 py-4 text-[.9rem]">
-          ✅ ไม่มีเรื่องค้างต้องจัดการ — ทีมตามงานครบ
-        </div>
+      </>
       )}
 
       {/* ── ② Team Scorecard ──────────────────────────────────────────── */}
