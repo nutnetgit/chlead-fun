@@ -90,6 +90,12 @@ const SECTIONS: { caption: string; roles: string[] | null; items: Item[] }[] = [
       { href: "/leads", label: "Pipeline ของฉัน", icon: <KanbanSquare size={16} /> },
       { href: "/chat", label: "แชทลูกค้า", icon: <MessageCircle size={16} /> },
       { href: "/pool", label: "Lead Pool", icon: <Inbox size={16} /> },
+      // Moved out of "ผู้จัดการ" (user-found bug 2026-07-14): that section
+      // is gated at the SECTION level to manager/gm/admin, which dropped
+      // /runrate for sales before the per-item menuKey check (menuAccess.ts)
+      // ever ran — adding "sales" there alone did nothing. Belongs here
+      // anyway: a sales viewer sees only their own numbers on this page.
+      { href: "/runrate", label: "Run Rate เป้าเดือน", icon: <TrendingUp size={16} /> },
     ],
   },
   {
@@ -98,7 +104,6 @@ const SECTIONS: { caption: string; roles: string[] | null; items: Item[] }[] = [
     items: [
       { href: "/dashboard", label: "Dashboard ทีม", icon: <LayoutDashboard size={16} /> },
       { href: "/lead-center", label: "ศูนย์รวม Lead", icon: <ListChecks size={16} /> },
-      { href: "/runrate", label: "Run Rate เป้าเดือน", icon: <TrendingUp size={16} /> },
       { href: "/events", label: "Event / บูธ", icon: <CalendarRange size={16} /> },
       { href: "/reports", label: "รายงาน", icon: <FileBarChart size={16} /> },
     ],
