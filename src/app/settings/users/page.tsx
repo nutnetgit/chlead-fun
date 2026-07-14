@@ -253,19 +253,12 @@ export default function UsersPage() {
             </select>
           </label>
           <label className="block">
-            <span className="text-[11px] font-medium text-[var(--text-2)] mb-1 block">สาขาหลัก</span>
-            <select value={draft.branchId} onChange={(e) => setDraft({ ...draft, branchId: e.target.value })} className={inputCls}>
-              <option value="">— ไม่ระบุ —</option>
-              {branches.filter((b) => b.isActive).map((b) => <option key={b.branchId} value={b.branchId}>{b.branchName}</option>)}
-            </select>
-          </label>
-          <label className="block md:col-span-2">
-            <span className="text-[11px] font-medium text-[var(--text-2)] mb-1 block">LINE User ID (สำหรับแจ้งเตือน/ปุ่ม ผจก.)</span>
-            <input value={draft.lineUserid} onChange={(e) => setDraft({ ...draft, lineUserid: e.target.value })} className={inputCls + " font-mono text-xs"} placeholder="Uxxxxxxxx…" />
-          </label>
-          <label className="block">
             <span className="text-[11px] font-medium text-[var(--text-2)] mb-1 block">ชื่อผู้ใช้ (เข้าระบบด้วยรหัสผ่าน แทน/นอกเหนือจาก LINE)</span>
             <input value={draft.username} onChange={(e) => setDraft({ ...draft, username: e.target.value })} className={inputCls + " font-mono text-xs"} placeholder="เช่น patcharawadee" />
+          </label>
+          <label className="block">
+            <span className="text-[11px] font-medium text-[var(--text-2)] mb-1 block">LINE User ID (สำหรับแจ้งเตือน/ปุ่ม ผจก.)</span>
+            <input value={draft.lineUserid} onChange={(e) => setDraft({ ...draft, lineUserid: e.target.value })} className={inputCls + " font-mono text-xs"} placeholder="Uxxxxxxxx…" />
           </label>
           {editingId !== null && (
             <div className="block">
@@ -291,6 +284,18 @@ export default function UsersPage() {
             </button>
           </div>
         )}
+
+        {/* สาขาหลัก moved here (user req 2026-07-14) — sits directly above
+            สาขาที่เข้าใช้งานได้ since the two are related (home branch vs.
+            every branch this user can access), instead of being stranded up
+            in the top grid several fields away. */}
+        <label className="block max-w-xs">
+          <span className="text-[11px] font-medium text-[var(--text-2)] mb-1 block">สาขาหลัก</span>
+          <select value={draft.branchId} onChange={(e) => setDraft({ ...draft, branchId: e.target.value })} className={inputCls}>
+            <option value="">— ไม่ระบุ —</option>
+            {branches.filter((b) => b.isActive).map((b) => <option key={b.branchId} value={b.branchId}>{b.branchName}</option>)}
+          </select>
+        </label>
 
         <div>
           <span className="text-[11px] font-medium text-[var(--text-2)] mb-2 block">

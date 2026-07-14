@@ -65,7 +65,13 @@ export default function LeadsPage() {
   const [logType, setLogType] = useState("call_out");
   const [logOutcome, setLogOutcome] = useState("reached");
   const [logSummary, setLogSummary] = useState("");
-  const [logNext, setLogNext] = useState("");
+  // Follow-up date/time (user req 2026-07-14: the native datetime-local
+  // picker's time widget follows the browser/OS locale and was showing
+  // AM/PM — split into a date input + explicit 24-hour hour/minute selects
+  // so it's unambiguous regardless of the viewer's locale settings).
+  const [logNextDate, setLogNextDate] = useState("");
+  const [logNextHour, setLogNextHour] = useState("");
+  const [logNextMinute, setLogNextMinute] = useState("");
   const [saving, setSaving] = useState(false);
   const [addOpen, setAddOpen] = useState(false);
   const [qrOpen, setQrOpen] = useState(false);
@@ -145,14 +151,17 @@ export default function LeadsPage() {
   async function saveLog() {
     if (!selected) return;
     setSaving(true);
+    const nextActionAt = logNextDate && logNextHour && logNextMinute
+      ? new Date(`${logNextDate}T${logNextHour}:${logNextMinute}:00`).toISOString()
+      : undefined;
     await fetch(`/api/leads/${selected}/activity`, {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         activityType: logType, outcome: logOutcome, summary: logSummary || undefined,
-        nextActionAt: logNext ? new Date(logNext).toISOString() : undefined,
+        nextActionAt,
       }),
     });
-    setSaving(false); setLogOpen(false); setLogSummary(""); setLogNext("");
+    setSaving(false); setLogOpen(false); setLogSummary(""); setLogNextDate(""); setLogNextHour(""); setLogNextMinute("");
     loadDetail(selected); loadList();
   }
 
@@ -557,8 +566,20 @@ export default function LeadsPage() {
             </label>
             <label className="block">
               <span className="text-[.72rem] text-[var(--text-2)] block mb-1">นัดติดตามครั้งถัดไป</span>
-              <input type="datetime-local" value={logNext} onChange={(e) => setLogNext(e.target.value)}
-                className="w-full px-3 py-2 text-sm bg-white border border-[var(--border-2)] rounded-lg" />
+              <div className="flex gap-2">
+                <input type="date" value={logNextDate} onChange={(e) => setLogNextDate(e.target.value)}
+                  className="flex-1 px-3 py-2 text-sm bg-white border border-[var(--border-2)] rounded-lg" />
+                <select value={logNextHour} onChange={(e) => setLogNextHour(e.target.value)}
+                  className="w-[4.5rem] px-2 py-2 text-sm bg-white border border-[var(--border-2)] rounded-lg">
+                  <option value="">ชม.</option>
+                  {Array.from({ length: 24 }, (_, h) => String(h).padStart(2, "0")).map((h) => <option key={h} value={h}>{h}</option>)}
+                </select>
+                <select value={logNextMinute} onChange={(e) => setLogNextMinute(e.target.value)}
+                  className="w-[4.5rem] px-2 py-2 text-sm bg-white border border-[var(--border-2)] rounded-lg">
+                  <option value="">นาที</option>
+                  {Array.from({ length: 12 }, (_, m) => String(m * 5).padStart(2, "0")).map((m) => <option key={m} value={m}>{m}</option>)}
+                </select>
+              </div>
             </label>
             <button onClick={saveLog} disabled={saving}
               className="w-full flex items-center justify-center gap-2 py-2.5 rounded-lg text-sm font-medium bg-[var(--primary)] text-white hover:bg-[var(--accent-text)] disabled:opacity-50 transition">

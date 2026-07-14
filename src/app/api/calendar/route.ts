@@ -28,9 +28,23 @@ export async function GET(request: NextRequest) {
     }),
     prisma.appointment.findMany({
       where: { scheduledAt: { gte: start, lt: end }, status: { in: ["scheduled", "confirmed"] } },
-      select: { scheduledAt: true },
+      select: { scheduledAt: true, leadId: true },
     }),
   ]);
+
+  // Bug fixed 2026-07-14: the appointment count wasn't owner-scoped at all —
+  // a salesperson's calendar showed every appointment company-wide, not just
+  // their own. Appointment has no Prisma relation to Lead (raw-SQL schema,
+  // only a leadId scalar) so this needs the same manual-join pattern used
+  // elsewhere in the app (e.g. LeadPool in /api/dashboard).
+  let scopedAppts = appts;
+  if (owner) {
+    const ownedLeadIds = new Set(
+      (await prisma.lead.findMany({ where: { ownerUserId: Number(owner) }, select: { leadId: true } }))
+        .map((l) => l.leadId.toString()),
+    );
+    scopedAppts = appts.filter((a) => ownedLeadIds.has(a.leadId.toString()));
+  }
 
   const due: Record<number, number> = {};
   for (const l of dueLeads) {
@@ -39,7 +53,7 @@ export async function GET(request: NextRequest) {
     due[d] = (due[d] ?? 0) + 1;
   }
   const appt: Record<number, number> = {};
-  for (const a of appts) {
+  for (const a of scopedAppts) {
     const d = a.scheduledAt.getDate();
     appt[d] = (appt[d] ?? 0) + 1;
   }
