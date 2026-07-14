@@ -6,19 +6,21 @@
 // per-salesperson targets, not real team grouping). Member assignment is a
 // single-select pill toggle (FunUser.teamId is one FK, not many-to-many).
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Plus, Pencil, Loader2, X, Trash2 } from "lucide-react";
 import { Card, inputCls } from "@/components/ui";
 import { SettingsShell } from "@/components/SettingsShell";
+import { useMe } from "@/components/Chrome";
 
 type TeamRow = { teamId: number; teamName: string; branchId: number | null; branchName: string | null; managerUserId: number | null; memberCount: number };
-type BranchRow = { branchId: number; branchName: string };
-type UserRow = { userId: number; displayName: string; role: string; teamId: number | null };
+type BranchRow = { branchId: number; branchName: string; brandId: number | null };
+type UserRow = { userId: number; displayName: string; role: string; teamId: number | null; branchId: number | null; branchIds: number[] };
 
 type Draft = { teamName: string; branchId: string; managerUserId: string };
 const EMPTY: Draft = { teamName: "", branchId: "", managerUserId: "" };
 
 export default function TeamsPage() {
+  const me = useMe();
   const [teams, setTeams] = useState<TeamRow[] | null>(null);
   const [branches, setBranches] = useState<BranchRow[]>([]);
   const [users, setUsers] = useState<UserRow[]>([]);
@@ -37,14 +39,51 @@ export default function TeamsPage() {
   const managerName = (id: number | null) => users.find((u) => u.userId === id)?.displayName ?? "—";
   const managers = users.filter((u) => u.role === "manager" || u.role === "gm");
 
+  // Brand scoping (user req 2026-07-14: "ต้อง filter เซลล์ ตามยี่ห้อด้วย") —
+  // a team belongs to one branch, so its brand is unambiguous. The member
+  // picker for a given team should only offer salespeople who actually sell
+  // that brand, not the whole company roster. Also scopes the branch
+  // dropdown in the create/edit form for a manager to their own branches.
+  const brandForBranch = (branchId: number | null) => branchId ? branches.find((b) => b.branchId === branchId)?.brandId ?? null : null;
+  const userBrandIds = useMemo(() => {
+    const m = new Map<number, Set<number>>();
+    for (const u of users) {
+      const ids = new Set([...(u.branchIds ?? []), ...(u.branchId ? [u.branchId] : [])]);
+      const brandIds = new Set([...ids].map((bid) => brandForBranch(bid)).filter((x): x is number => x !== null));
+      m.set(u.userId, brandIds);
+    }
+    return m;
+  }, [users, branches]);
+  const eligibleMembers = (t: TeamRow) => {
+    const brandId = brandForBranch(t.branchId);
+    // A CURRENT member must always show (bug found 2026-07-14: the brand
+    // filter hid anyone already in the team whose branch data no longer
+    // matched that brand, leaving no pill to click and no way to remove
+    // them) — brand-scoping only decides who's offered as a NEW candidate.
+    return users.filter((u) =>
+      (u.role === "sales" || u.role === "manager") &&
+      (u.teamId === t.teamId || brandId === null || userBrandIds.get(u.userId)?.has(brandId)));
+  };
+
+  const isManager = me?.user?.role === "manager";
+  const myBranchOptions = isManager
+    ? branches.filter((b) => users.find((u) => u.userId === me?.user?.funUserId)?.branchIds?.includes(b.branchId) || users.find((u) => u.userId === me?.user?.funUserId)?.branchId === b.branchId)
+    : branches;
+
+  // Edit form sits at the very bottom of a long team list — scroll it into
+  // view on แก้ไข (same fix as /settings/users: clicking edit looked like
+  // nothing happened because the form was off-screen).
+  const editFormRef = useRef<HTMLDivElement>(null);
   const startEdit = (t: TeamRow) => {
     setEditingId(t.teamId);
     setDraft({ teamName: t.teamName, branchId: t.branchId ? String(t.branchId) : "", managerUserId: t.managerUserId ? String(t.managerUserId) : "" });
+    setTimeout(() => editFormRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 50);
   };
   const cancel = () => { setEditingId(null); setDraft(EMPTY); setError(null); };
 
   async function save() {
     if (!draft.teamName.trim()) { setError("ต้องระบุชื่อทีม"); return; }
+    if (isManager && !draft.branchId) { setError("เลือกสาขาของทีมก่อน"); return; }
     setSaving(true); setError(null);
     const body = {
       teamName: draft.teamName,
@@ -102,7 +141,10 @@ export default function TeamsPage() {
                     <button onClick={() => removeTeam(t)} className="p-1.5 rounded hover:bg-[var(--red-soft)] text-[var(--red)]" title="ลบ"><Trash2 size={14} /></button>
                   </div>
                   <div className="flex flex-wrap gap-2">
-                    {users.filter((u) => u.role === "sales" || u.role === "manager").map((u) => {
+                    {eligibleMembers(t).length === 0 && (
+                      <span className="text-[.74rem] text-[var(--text-3)]">ไม่มีเซลส์ที่ขายยี่ห้อนี้ได้ — ตรวจสอบสิทธิ์เข้าสาขาของผู้ใช้ที่หน้าตั้งค่าผู้ใช้</span>
+                    )}
+                    {eligibleMembers(t).map((u) => {
                       const on = u.teamId === t.teamId;
                       return (
                         <button key={u.userId} type="button" onClick={() => toggleMember(u, t.teamId)}
@@ -120,6 +162,7 @@ export default function TeamsPage() {
           )}
         </Card>
 
+        <div ref={editFormRef} className="scroll-mt-4" />
         <Card title={editingId === null ? "สร้างทีม" : `แก้ไขทีม #${editingId}`}>
           <div className="grid gap-3 md:grid-cols-3">
             <label className="block">
@@ -127,10 +170,11 @@ export default function TeamsPage() {
               <input value={draft.teamName} onChange={(e) => setDraft({ ...draft, teamName: e.target.value })} className={inputCls} placeholder="เช่น ทีม Mazda ศาลายา" />
             </label>
             <label className="block">
-              <span className="text-[11px] font-medium text-[var(--text-2)] mb-1 block">สาขา</span>
+              <span className="text-[11px] font-medium text-[var(--text-2)] mb-1 block">สาขา{isManager ? " *" : ""}</span>
               <select value={draft.branchId} onChange={(e) => setDraft({ ...draft, branchId: e.target.value })} className={inputCls}>
-                <option value="">— ไม่ระบุ —</option>
-                {branches.map((b) => <option key={b.branchId} value={b.branchId}>{b.branchName}</option>)}
+                {!isManager && <option value="">— ไม่ระบุ —</option>}
+                {isManager && <option value="">— เลือกสาขา —</option>}
+                {myBranchOptions.map((b) => <option key={b.branchId} value={b.branchId}>{b.branchName}</option>)}
               </select>
             </label>
             <label className="block">

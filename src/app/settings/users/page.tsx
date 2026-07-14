@@ -4,7 +4,7 @@
 // sales manager · sales. A user has a home branch plus a flexible set of
 // allowed branches (fun_user_branch) — branches are per-brand.
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Plus, Pencil, Loader2, X, KeyRound, Copy, RotateCcw } from "lucide-react";
 import { Card, Toggle, inputCls } from "@/components/ui";
 import { SettingsShell } from "@/components/SettingsShell";
@@ -53,6 +53,11 @@ export default function UsersPage() {
   const brandsForBranchIds = (ids: number[]) =>
     [...new Set(ids.map((id) => branches.find((b) => b.branchId === id)?.brandName).filter((x): x is string => !!x))];
 
+  // The edit form lives at the very bottom, below a long user list — scroll
+  // it into view on แก้ไข (user req 2026-07-14: clicking edit looked like
+  // nothing happened because the form was off-screen).
+  const editFormRef = useRef<HTMLDivElement>(null);
+
   const startEdit = (u: UserRow) => {
     setEditingId(u.userId);
     setTempPassword(null);
@@ -62,6 +67,7 @@ export default function UsersPage() {
       username: u.username ?? "", branchIds: u.branchIds,
       menuAccess: u.menuAccess,
     });
+    setTimeout(() => editFormRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 50);
   };
   const cancel = () => { setEditingId(null); setDraft(EMPTY); setError(null); setTempPassword(null); };
 
@@ -224,6 +230,7 @@ export default function UsersPage() {
         )}
       </Card>
 
+      <div ref={editFormRef} className="scroll-mt-4" />
       <Card title={editingId === null ? "เพิ่มผู้ใช้" : `แก้ไขผู้ใช้ #${editingId}`}>
         <div className="grid gap-3 md:grid-cols-2">
           <label className="block">

@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import bcrypt from "bcryptjs";
 import { prisma } from "@/lib/prisma";
 import { genTempPassword } from "@/lib/password";
-import { requireRole } from "@/lib/authz";
+import { requireRole, managerAllowedBranchIds } from "@/lib/authz";
 import { MENU_DEFS } from "@/lib/menuAccess";
 
 type Ctx = { params: Promise<{ id: string }> };
@@ -13,8 +13,14 @@ const VALID_MENU_KEYS = new Set(MENU_DEFS.map((m) => m.key as string));
 // { resetPassword: true } issues a fresh temp password (admin never sees the
 // user's real one after they change it) — returned ONCE in the response so
 // the admin can hand it over; the user must change it on first login.
+//
+// Manager exception (user req 2026-07-14): /settings/teams's member-toggle
+// calls this exact route to flip teamId, but the route was admin/gm-only —
+// a manager using the very page built for them got a silent 403. Now a
+// manager may PUT teamId ONLY, and only on a sales/manager user within one
+// of their own branches; every other field still 403s for them.
 export async function PUT(request: NextRequest, { params }: Ctx) {
-  const rq = await requireRole(["admin", "gm"]);
+  const rq = await requireRole(["admin", "gm", "manager"]);
   if (!rq.ok) return rq.response;
 
   const { id } = await params;
@@ -22,6 +28,25 @@ export async function PUT(request: NextRequest, { params }: Ctx) {
   if (!Number.isInteger(userId)) return NextResponse.json({ error: "bad id" }, { status: 400 });
 
   const b = (await request.json().catch(() => ({}))) as Record<string, unknown>;
+
+  if (rq.role === "manager") {
+    const fields = Object.keys(b).filter((k) => k !== "teamId");
+    if (fields.length) return NextResponse.json({ error: "ผู้จัดการแก้ไขได้เฉพาะทีมที่สังกัด" }, { status: 403 });
+    const target = await prisma.funUser.findUnique({ where: { userId }, include: { branchLinks: true } });
+    if (!target || (target.role !== "sales" && target.role !== "manager")) {
+      return NextResponse.json({ error: "ไม่พบผู้ใช้" }, { status: 404 });
+    }
+    const allowed = await managerAllowedBranchIds(rq.funUserId!);
+    const targetBranchIds = [...target.branchLinks.map((l) => l.branchId), ...(target.branchId ? [target.branchId] : [])];
+    if (!targetBranchIds.some((bid) => allowed.includes(bid))) {
+      return NextResponse.json({ error: "ผู้ใช้นี้ไม่ได้อยู่ในสาขาของคุณ" }, { status: 403 });
+    }
+    if (typeof b.teamId === "number" || b.teamId === null) {
+      await prisma.funUser.update({ where: { userId }, data: { teamId: b.teamId } });
+    }
+    return NextResponse.json({ ok: true });
+  }
+
   const data: Record<string, unknown> = {};
   if (typeof b.displayName === "string" && b.displayName.trim()) data.displayName = b.displayName.trim();
   if (typeof b.nickname === "string") data.nickname = b.nickname.trim() || null;

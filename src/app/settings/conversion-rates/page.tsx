@@ -13,7 +13,7 @@ import type { ConversionRateConfig } from "@/lib/settings";
 export default function ConversionRatesPage() {
   const [config, setConfig] = useState<ConversionRateConfig | null>(null);
   const [draft, setDraft] = useState<Record<keyof ConversionRateConfig, string>>({
-    hotProbabilityPct: "", warmProbabilityPct: "", coldProbabilityPct: "", hotAgingDays: "",
+    hotProbabilityPct: "", warmProbabilityPct: "", coldProbabilityPct: "", hotAgingDays: "", leadsPerBooking: "",
   });
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
@@ -25,6 +25,7 @@ export default function ConversionRatesPage() {
       setDraft({
         hotProbabilityPct: String(c.hotProbabilityPct), warmProbabilityPct: String(c.warmProbabilityPct),
         coldProbabilityPct: String(c.coldProbabilityPct), hotAgingDays: String(c.hotAgingDays),
+        leadsPerBooking: String(c.leadsPerBooking ?? 10),
       });
     });
   }, []);
@@ -38,6 +39,7 @@ export default function ConversionRatesPage() {
         warmProbabilityPct: Number(draft.warmProbabilityPct),
         coldProbabilityPct: Number(draft.coldProbabilityPct),
         hotAgingDays: Number(draft.hotAgingDays),
+        leadsPerBooking: Number(draft.leadsPerBooking),
       }),
     });
     setSaving(false);
@@ -81,6 +83,17 @@ export default function ConversionRatesPage() {
               </label>
             </div>
             {previewWeighted && <p className="text-[.76rem] text-[var(--text-3)] mt-1">{previewWeighted}</p>}
+          </Card>
+
+          <Card title="ตัวคูณเป้า Lead (Lead ต่อ 1 จอง)" desc="หน้า Run Rate ใช้ตัวเลขนี้คูณกับเป้าจองของผจก. เพื่อแสดงเป้า Lead ประจำเดือนอัตโนมัติ — ไม่ต้องกรอกเป้า Lead แยกอีกช่อง (เช่น เป้าจอง 10 × 10 = ต้องหา Lead 100 ราย)">
+            <label className="block max-w-xs">
+              <span className="text-[11px] font-medium text-[var(--text-2)] mb-1 block">Lead ที่ต้องหา ต่อ 1 เคสจอง</span>
+              <div className="flex items-center gap-2">
+                <input type="number" min={1} step={0.5} value={draft.leadsPerBooking}
+                  onChange={(e) => setDraft({ ...draft, leadsPerBooking: e.target.value })} className={inputCls} />
+                <span className="text-[.8rem] text-[var(--text-2)] shrink-0">ราย/จอง</span>
+              </div>
+            </label>
           </Card>
 
           <Card title="เกณฑ์ Lead Aging" desc="Lead HOT ที่ไม่มีความเคลื่อนไหวนานเกินกำหนดนี้ จะถูกปรับลดอุณหภูมิเป็น WARM อัตโนมัติ (ความอยากซื้อลดลงตามเวลา)">

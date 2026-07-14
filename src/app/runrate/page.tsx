@@ -10,6 +10,8 @@ import { useMe } from "@/components/Chrome";
 
 type Data = {
   scope: string;
+  brandId: number | null;
+  leadTarget: { leadsPerBooking: number; fromBooking: number | null; fromEvents: number; total: number | null };
   config: { target: number | null; teamMonthlyTarget: number | null; perUser: Record<string, number> };
   month: { name: number; daysElapsed: number; daysLeft: number; daysInMonth: number; actualBookings: number; target: number | null; carryIn: number; neededThisMonth: number | null };
   leads: { toDate: number; projected: number; expectedRest: number };
@@ -24,7 +26,9 @@ type Data = {
   monthsTable: { month: number; actual: number; target: number | null; carry: number | null }[];
   note: string;
 };
-type UserRow = { userId: number; displayName: string; role: string };
+type UserRow = { userId: number; displayName: string; role: string; branchId: number | null; branchIds: number[] };
+type BrandRow = { brandId: number; brandName: string };
+type BranchRow = { branchId: number; brandId: number | null };
 
 const TH_M = ["ม.ค.", "ก.พ.", "มี.ค.", "เม.ย.", "พ.ค.", "มิ.ย.", "ก.ค.", "ส.ค.", "ก.ย.", "ต.ค.", "พ.ย.", "ธ.ค."];
 const pct = (n: number) => `${(n * 100).toFixed(1)}%`;
@@ -34,22 +38,47 @@ export default function RunRatePage() {
   const isSales = me?.user?.role === "sales";
   const [d, setD] = useState<Data | null>(null);
   const [users, setUsers] = useState<UserRow[]>([]);
+  const [allUsers, setAllUsers] = useState<UserRow[]>([]);
+  const [brands, setBrands] = useState<BrandRow[]>([]);
+  const [branches, setBranches] = useState<BranchRow[]>([]);
+  const [brandFilter, setBrandFilter] = useState<number | null>(null);
   const [teamTarget, setTeamTarget] = useState("");
   const [perUser, setPerUser] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
 
   const load = useCallback(() => {
-    const q = isSales && me?.user ? `?owner=${me.user.funUserId}` : "";
+    const params = new URLSearchParams();
+    if (isSales && me?.user) params.set("owner", String(me.user.funUserId));
+    if (brandFilter !== null) params.set("brandId", String(brandFilter));
+    const q = params.toString() ? `?${params.toString()}` : "";
     fetch(`/api/runrate${q}`).then((r) => r.json()).then((data: Data) => {
       setD(data);
       setTeamTarget(data.config.teamMonthlyTarget ? String(data.config.teamMonthlyTarget) : "");
       setPerUser(Object.fromEntries(Object.entries(data.config.perUser).map(([k, v]) => [k, String(v)])));
     });
-  }, [isSales, me]);
+  }, [isSales, me, brandFilter]);
   useEffect(() => { load(); }, [load]);
   useEffect(() => {
-    fetch("/api/users").then((r) => r.json()).then((us: UserRow[]) => setUsers(us.filter((u) => u.role === "sales" || u.role === "manager")));
+    fetch("/api/users").then((r) => r.json()).then((us: UserRow[]) => {
+      setAllUsers(us);
+      setUsers(us.filter((u) => u.role === "sales" || u.role === "manager"));
+    });
+    fetch("/api/branches").then((r) => r.json()).then((data) => { setBrands(data.brands ?? []); setBranches(data.branches ?? []); });
   }, []);
+
+  // Brand chips (user req 2026-07-14: multi-brand ผจก./เซลส์ need separated
+  // and combined views): scoped to the brands of the viewer's own branches —
+  // admin/gm see every brand; single-brand users get no chip bar at all.
+  const myBrands = (() => {
+    const role = me?.user?.role;
+    if (!role) return [];
+    if (role === "admin" || role === "gm") return brands;
+    const self = allUsers.find((u) => u.userId === me?.user?.funUserId);
+    const branchIds = new Set([...(self?.branchIds ?? []), ...(self?.branchId ? [self.branchId] : [])]);
+    if (!branchIds.size) return brands;
+    const brandIds = new Set(branches.filter((b) => branchIds.has(b.branchId)).map((b) => b.brandId).filter((x): x is number => x !== null));
+    return brands.filter((b) => brandIds.has(b.brandId));
+  })();
 
   async function saveConfig() {
     setSaving(true);
@@ -74,6 +103,26 @@ export default function RunRatePage() {
         <h1 className="text-[1.7rem]">Run Rate เป้าเดือน {TH_M[m.name - 1]}</h1>
         <p className="text-[var(--text-2)] text-[.95rem]">นับจำนวนจอง (จองได้ = จบเคส) · เกินเป้าเดือนนี้ยกไปเดือนหน้า · เหลืออีก {m.daysLeft} วัน</p>
       </div>
+
+      {myBrands.length > 1 && (
+        <div className="flex items-center gap-2 flex-wrap">
+          <span className="text-[11px] font-medium text-[var(--text-3)]">ยี่ห้อ</span>
+          <button onClick={() => setBrandFilter(null)}
+            className={`text-[.76rem] px-3 py-1 rounded-full border transition ${
+              brandFilter === null ? "bg-[var(--accent-soft)] border-[var(--primary)] text-[var(--accent-text)] font-medium"
+                                   : "bg-white border-[var(--border-2)] text-[var(--text-2)] hover:border-[var(--text-3)]"}`}>
+            รวมทุกยี่ห้อ
+          </button>
+          {myBrands.map((b) => (
+            <button key={b.brandId} onClick={() => setBrandFilter(brandFilter === b.brandId ? null : b.brandId)}
+              className={`text-[.76rem] px-3 py-1 rounded-full border transition ${
+                brandFilter === b.brandId ? "bg-[var(--accent-soft)] border-[var(--primary)] text-[var(--accent-text)] font-medium"
+                                          : "bg-white border-[var(--border-2)] text-[var(--text-2)] hover:border-[var(--text-3)]"}`}>
+              {b.brandName}
+            </button>
+          ))}
+        </div>
+      )}
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         {[
@@ -122,6 +171,28 @@ export default function RunRatePage() {
             </>
           )}
         </div>
+      )}
+
+      {d.leadTarget.total !== null && (
+        <Card title="เป้า Lead เดือนนี้ (คำนวณอัตโนมัติ)" desc="เป้าจอง × ตัวคูณ Lead ต่อ 1 จอง (ตั้งค่าที่ Conversion Rate) + เป้า Lead จาก Event ที่คาบเกี่ยวเดือนนี้ (event คร่อมเดือนแบ่งเป้าตามสัดส่วนวัน)">
+          <div className="grid grid-cols-3 gap-3">
+            <div className="bg-white border border-[var(--border)] rounded-xl px-3 py-2.5">
+              <div className="text-[.7rem] text-[var(--text-3)]">จากเป้าจอง{d.leadTarget.fromBooking !== null ? ` (${m.target} × ${d.leadTarget.leadsPerBooking})` : ""}</div>
+              <div className="text-lg font-semibold num mt-0.5">{d.leadTarget.fromBooking ?? "—"}</div>
+            </div>
+            <div className="bg-white border border-[var(--border)] rounded-xl px-3 py-2.5">
+              <div className="text-[.7rem] text-[var(--text-3)]">จาก Event เดือนนี้</div>
+              <div className="text-lg font-semibold num mt-0.5">{d.leadTarget.fromEvents}</div>
+            </div>
+            <div className="bg-[var(--accent-soft)] border border-[var(--primary)] rounded-xl px-3 py-2.5">
+              <div className="text-[.7rem] text-[var(--accent-text)]">รวมเป้า Lead เดือนนี้</div>
+              <div className="text-lg font-bold num mt-0.5 text-[var(--accent-text)]">{d.leadTarget.total} ราย</div>
+            </div>
+          </div>
+          <div className="text-[.76rem] text-[var(--text-2)]">
+            เทียบของจริง: Lead เข้าแล้ว <b className="num">{d.leads.toDate}</b> ราย · คาดทั้งเดือน <b className="num">{d.leads.projected}</b> ราย
+          </div>
+        </Card>
       )}
 
       <Card title="Weighted Pipeline (พยากรณ์จาก Lead ที่เปิดอยู่)" desc="Lead ที่ active ตอนนี้ × โอกาสปิดของแต่ละระดับ (ตั้งค่าได้ที่ /settings/conversion-rates)">
@@ -173,13 +244,13 @@ export default function RunRatePage() {
         </Card>
 
         {!isSales && (
-          <Card title="ตั้งเป้า (ผจก.)" desc="เป้าทีมต่อเดือน + เป้ารายเซลส์ (เซลส์จะเห็นเป้าของตัวเองในหน้านี้)">
+          <Card title="ตั้งเป้าจอง (ผจก.)" desc="ตัวเลขทุกช่องในการ์ดนี้คือจำนวน 'เคสจอง' ต่อเดือน — เป้า Lead ไม่ต้องกรอก ระบบคูณให้อัตโนมัติจากตัวคูณในหน้า Conversion Rate (การ์ดเป้า Lead ด้านบน)">
             <label className="block max-w-xs">
-              <span className="text-[11px] font-medium text-[var(--text-2)] mb-1 block">เป้าทีม (เคสจอง/เดือน)</span>
+              <span className="text-[11px] font-medium text-[var(--text-2)] mb-1 block">เป้าจองของทีม (เคสจอง/เดือน)</span>
               <input type="number" value={teamTarget} onChange={(e) => setTeamTarget(e.target.value)} className={inputCls} placeholder="เช่น 25" />
             </label>
             <div>
-              <span className="text-[11px] font-medium text-[var(--text-2)] mb-2 block">เป้ารายเซลส์ (เคส/เดือน)</span>
+              <span className="text-[11px] font-medium text-[var(--text-2)] mb-2 block">เป้าจองรายเซลส์ (เคสจอง/เดือน)</span>
               <div className="grid md:grid-cols-2 gap-x-6 gap-y-2">
                 {users.map((u) => (
                   <label key={u.userId} className="flex items-center gap-2 text-[.8rem]">
@@ -193,7 +264,7 @@ export default function RunRatePage() {
             </div>
             <button onClick={saveConfig} disabled={saving}
               className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold bg-[var(--primary)] text-[var(--primary-foreground)] hover:brightness-95 disabled:opacity-50">
-              {saving ? <Loader2 size={14} className="animate-spin" /> : null} บันทึกเป้า
+              {saving ? <Loader2 size={14} className="animate-spin" /> : null} บันทึกเป้าจอง
             </button>
           </Card>
         )}

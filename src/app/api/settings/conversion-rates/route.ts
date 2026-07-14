@@ -29,6 +29,7 @@ export async function PUT(request: NextRequest) {
     warmProbabilityPct: clampPct(b.warmProbabilityPct, current.warmProbabilityPct),
     coldProbabilityPct: clampPct(b.coldProbabilityPct, current.coldProbabilityPct),
     hotAgingDays: typeof b.hotAgingDays === "number" && b.hotAgingDays > 0 ? Math.round(b.hotAgingDays) : current.hotAgingDays,
+    leadsPerBooking: typeof b.leadsPerBooking === "number" && b.leadsPerBooking > 0 ? Math.round(b.leadsPerBooking * 10) / 10 : current.leadsPerBooking,
   };
   await setSetting("conversionRates", next);
   return NextResponse.json({ ok: true, config: next });

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { requireRole } from "@/lib/authz";
+import { requireRole, managerAllowedBranchIds } from "@/lib/authz";
 
 const DAY = 24 * 60 * 60 * 1000;
 
@@ -24,17 +24,29 @@ export async function GET(request: NextRequest) {
   const filter = p.get("filter") ?? "due";
   const owner = rq.role === "sales" ? String(rq.funUserId) : p.get("owner");
 
+  // Branch scope for managers (user req 2026-07-14: a manager opening Lead
+  // Center saw every brand's leads) — scoped to their fun_user_branch links;
+  // admin/gm stay global; a manager with no links falls back to everything
+  // (same graceful rule as the QR modal / pool).
+  let branchScope: number[] | null = null;
+  if (rq.role === "manager") {
+    const allowed = await managerAllowedBranchIds(rq.funUserId!);
+    if (allowed.length) branchScope = allowed;
+  }
+  const branchWhere = branchScope ? { branchId: { in: branchScope } } : {};
+
   const endOfToday = new Date();
   endOfToday.setHours(23, 59, 59, 999);
 
   const leads = await prisma.lead.findMany({
     where: filter === "archived"
-      ? { archivedAt: { not: null }, ...(owner ? { ownerUserId: Number(owner) } : {}) }
+      ? { archivedAt: { not: null }, ...(owner ? { ownerUserId: Number(owner) } : {}), ...branchWhere }
       : {
           status: "active",
           archivedAt: null,
           ...(owner ? { ownerUserId: Number(owner) } : {}),
           ...(filter === "due" ? { nextActionAt: { lte: endOfToday } } : {}),
+          ...branchWhere,
         },
     include: {
       person: true, brand: true, branch: true,

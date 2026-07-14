@@ -27,10 +27,33 @@ export async function POST(request: NextRequest, { params }: Ctx) {
   if (!pool) return NextResponse.json({ error: "not found" }, { status: 404 });
   if (pool.claimedAt) return NextResponse.json({ error: "already claimed" }, { status: 409 });
 
+  // Restore the lead to a WORKING stage (user-reported bug 2026-07-14: after
+  // claiming, the lead never appeared on the new owner's board — status went
+  // back to "active" but stage stayed "forfeited", which no kanban column
+  // shows and no working view lists). Resume from where it was when it got
+  // forfeited (the forfeit history row's fromStage), falling back to "new".
+  const forfeitHistory = await prisma.leadStageHistory.findFirst({
+    where: { leadId: pool.leadId, toStage: "forfeited" },
+    orderBy: { historyId: "desc" },
+  });
+  const lead = await prisma.lead.findUnique({ where: { leadId: pool.leadId } });
+  // Only resume to a stage the working board actually shows — anything else
+  // recorded in history (lost/nurture/forfeited itself) resets to "new".
+  const WORKING_STAGES = new Set(["new", "contacted", "qualified", "appointment", "test_drive", "negotiation", "finance_check", "booking"]);
+  const from = forfeitHistory?.fromStage;
+  const resumeStage = (from && WORKING_STAGES.has(from) ? from : "new") as "new";
   const now = new Date();
   await prisma.$transaction([
     prisma.leadPool.update({ where: { poolId }, data: { claimedBy, claimedAt: now } }),
-    prisma.lead.update({ where: { leadId: pool.leadId }, data: { ownerUserId: newOwnerId, status: "active" } }),
+    // nextActionAt = now so it lands in the new owner's "due today" view
+    // immediately — a claimed lead is exactly the thing to act on first.
+    prisma.lead.update({
+      where: { leadId: pool.leadId },
+      data: { ownerUserId: newOwnerId, status: "active", stage: resumeStage, nextActionAt: now },
+    }),
+    prisma.leadStageHistory.create({
+      data: { leadId: pool.leadId, fromStage: lead?.stage ?? "forfeited", toStage: resumeStage, changedBy: claimedBy, note: "pool claim — resume working stage" },
+    }),
     prisma.assignmentHistory.create({
       data: { leadId: pool.leadId, fromUserId: null, toUserId: newOwnerId, reason: "load_balance", assignedBy: claimedBy },
     }),

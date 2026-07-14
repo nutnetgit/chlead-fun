@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { requireRole } from "@/lib/authz";
+import { requireRole, managerAllowedBranchIds } from "@/lib/authz";
 
 /**
  * Chat inbox list (user req 2026-07-08) — one row per lead that has at least
@@ -15,6 +15,16 @@ export async function GET() {
   const rq = await requireRole(["sales", "manager", "gm", "admin"]);
   if (!rq.ok) return rq.response;
 
+  // Branch scope for managers (user req 2026-07-14: chat inbox showed every
+  // brand's conversations) — same rule as /api/leads: manager sees only
+  // threads of leads in their own branches; admin/gm global; no links →
+  // graceful fallback to everything.
+  let branchScope: number[] | null = null;
+  if (rq.role === "manager") {
+    const allowed = await managerAllowedBranchIds(rq.funUserId!);
+    if (allowed.length) branchScope = allowed;
+  }
+
   const grouped = await prisma.chatMessage.groupBy({
     by: ["leadId"],
     where: { leadId: { not: null } },
@@ -22,7 +32,11 @@ export async function GET() {
   const leadIds = grouped.map((g) => g.leadId).filter((x): x is bigint => x !== null);
 
   const leads = leadIds.length ? await prisma.lead.findMany({
-    where: { leadId: { in: leadIds }, ...(rq.role === "sales" ? { ownerUserId: rq.funUserId } : {}) },
+    where: {
+      leadId: { in: leadIds },
+      ...(rq.role === "sales" ? { ownerUserId: rq.funUserId } : {}),
+      ...(branchScope ? { branchId: { in: branchScope } } : {}),
+    },
     include: { person: true, brand: true, branch: true },
   }) : [];
 

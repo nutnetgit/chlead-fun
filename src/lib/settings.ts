@@ -108,6 +108,11 @@ export type ConversionRateConfig = {
   warmProbabilityPct: number;
   coldProbabilityPct: number;
   hotAgingDays: number; // HOT lead idle longer than this auto-downgrades to WARM
+  // เป้า Lead อัตโนมัติ (user req 2026-07-14): the runrate page derives the
+  // monthly lead target from the manager's BOOKING target × this multiplier
+  // (e.g. เป้าจอง 10 × 10 = ต้องหา lead 100) instead of a second hand-typed
+  // number that would drift out of sync.
+  leadsPerBooking: number;
 };
 
 export const CONVERSION_RATE_DEFAULTS: ConversionRateConfig = {
@@ -115,6 +120,7 @@ export const CONVERSION_RATE_DEFAULTS: ConversionRateConfig = {
   warmProbabilityPct: 10,
   coldProbabilityPct: 2,
   hotAgingDays: 14,
+  leadsPerBooking: 10,
 };
 
 export async function getConversionRateConfig(): Promise<ConversionRateConfig> {

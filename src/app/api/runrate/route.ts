@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSetting, setSetting, getConversionRateConfig } from "@/lib/settings";
-import { requireRole } from "@/lib/authz";
+import { requireRole, managerAllowedBranchIds } from "@/lib/authz";
 
 export const runtime = "nodejs";
 
@@ -33,6 +33,25 @@ export async function GET(request: NextRequest) {
   const owner = rq.role === "sales" ? String(rq.funUserId) : request.nextUrl.searchParams.get("owner");
   const ownerId = owner ? Number(owner) : null;
 
+  // Per-brand view (user req 2026-07-14: multi-brand managers/sales need the
+  // numbers separated AND combined) — ?brandId= scopes every count in this
+  // endpoint consistently, so combined-vs-brand figures always reconcile.
+  const brandParam = request.nextUrl.searchParams.get("brandId");
+  const brandId = brandParam && Number.isInteger(Number(brandParam)) ? Number(brandParam) : null;
+
+  // Managers are also pinned to their own branches (same 2026-07-14 audit as
+  // Lead Center) — their "team" numbers mean THEIR branches, not the whole
+  // group. admin/gm stay global; no links → graceful fallback.
+  let branchScope: number[] | null = null;
+  if (rq.role === "manager" || rq.role === "sales") {
+    const allowed = await managerAllowedBranchIds(rq.funUserId!);
+    if (allowed.length) branchScope = allowed;
+  }
+  const leadScopeWhere = {
+    ...(brandId !== null ? { brandId } : {}),
+    ...(branchScope ? { branchId: { in: branchScope } } : {}),
+  };
+
   const now = new Date();
   const yearStart = new Date(now.getFullYear(), 0, 1);
   const monthIdx = now.getMonth(); // 0-based
@@ -49,7 +68,7 @@ export async function GET(request: NextRequest) {
 
   // Bookings this year via stage history (first time a lead hit 'booking').
   const bookingEvents = await prisma.leadStageHistory.findMany({
-    where: { toStage: "booking", changedAt: { gte: yearStart } },
+    where: { toStage: "booking", changedAt: { gte: yearStart }, lead: leadScopeWhere },
     include: { lead: { select: { ownerUserId: true } } },
   });
   const scoped = bookingEvents.filter((e) => !ownerId || e.lead.ownerUserId === ownerId);
@@ -76,7 +95,7 @@ export async function GET(request: NextRequest) {
 
   // Lead flow + conversion (90-day cohort, count-based).
   const cohort = await prisma.lead.findMany({
-    where: { createdAt: { gte: windowStart }, ...(ownerId ? { ownerUserId: ownerId } : {}) },
+    where: { createdAt: { gte: windowStart }, ...(ownerId ? { ownerUserId: ownerId } : {}), ...leadScopeWhere },
     select: { stage: true, createdAt: true },
   });
   const cohortConverted = cohort.filter((l) => (CONVERTED_STAGES as readonly string[]).includes(l.stage)).length;
@@ -95,7 +114,7 @@ export async function GET(request: NextRequest) {
   const rates = await getConversionRateConfig();
   const byTemp = await prisma.lead.groupBy({
     by: ["temperature"],
-    where: { status: "active", ...(ownerId ? { ownerUserId: ownerId } : {}) },
+    where: { status: "active", ...(ownerId ? { ownerUserId: ownerId } : {}), ...leadScopeWhere },
     _count: true,
   });
   const tempCount = { hot: 0, warm: 0, cold: 0 };
@@ -106,6 +125,44 @@ export async function GET(request: NextRequest) {
     cold: { count: tempCount.cold, probabilityPct: rates.coldProbabilityPct, expected: Math.round(tempCount.cold * (rates.coldProbabilityPct / 100) * 10) / 10 },
   };
   const weightedExpectedTotal = Math.round((weightedPipeline.hot.expected + weightedPipeline.warm.expected + weightedPipeline.cold.expected) * 10) / 10;
+
+  // ── เป้า Lead อัตโนมัติ (user req 2026-07-14) ─────────────────────────────
+  // เป้า lead = เป้าจอง × leadsPerBooking (ตั้งตัวคูณที่ /settings/conversion-
+  // rates) + เป้า lead จาก event ที่คาบเกี่ยวเดือนนี้. Event ที่คร่อมเดือนถูก
+  // แบ่งเป้าตามสัดส่วนจำนวนวันของ event ที่ตกในแต่ละเดือน (pro-rata by days)
+  // — เดือนที่งานกินเวลามากกว่าย่อมแบกเป้ามากกว่า และผลรวมทุกเดือน = เป้าเต็ม
+  // ของ event เสมอ ไม่นับซ้ำ.
+  const monthEnd = new Date(now.getFullYear(), monthIdx + 1, 0);
+  const campaigns = await prisma.campaign.findMany({
+    where: {
+      startDate: { lte: monthEnd }, endDate: { gte: monthStart },
+      ...(brandId !== null ? { brands: { some: { brandId } } } : {}),
+      ...(branchScope ? { OR: [{ branchId: { in: branchScope } }, { branchId: null }] } : {}),
+    },
+    include: { targets: true },
+  });
+  let eventLeadTargetRaw = 0;
+  for (const c of campaigns) {
+    if (!c.startDate || !c.endDate) continue;
+    const totalDays = Math.max(1, Math.round((c.endDate.getTime() - c.startDate.getTime()) / DAY) + 1);
+    const overlapStart = Math.max(c.startDate.getTime(), monthStart.getTime());
+    const overlapEnd = Math.min(c.endDate.getTime(), monthEnd.getTime());
+    const overlapDays = Math.max(0, Math.round((overlapEnd - overlapStart) / DAY) + 1);
+    // Per-sales scope uses that person's own event target; team scope uses
+    // the event's overall target (falling back to the sum of per-sales ones).
+    const base = ownerId
+      ? (c.targets.find((t) => t.userId === ownerId)?.targetLeads ?? 0)
+      : (c.targetLeads ?? c.targets.reduce((s, t) => s + t.targetLeads, 0));
+    eventLeadTargetRaw += base * (overlapDays / totalDays);
+  }
+  const eventLeadTarget = Math.round(eventLeadTargetRaw);
+  const leadTargetFromBooking = target ? Math.round(target * rates.leadsPerBooking) : null;
+  const leadTarget = {
+    leadsPerBooking: rates.leadsPerBooking,
+    fromBooking: leadTargetFromBooking,
+    fromEvents: eventLeadTarget,
+    total: leadTargetFromBooking !== null ? leadTargetFromBooking + eventLeadTarget : (eventLeadTarget || null),
+  };
 
   // The headline: leads still required vs leads expected to arrive anyway.
   let needLeads = null;
@@ -120,6 +177,8 @@ export async function GET(request: NextRequest) {
 
   return NextResponse.json({
     scope: ownerId ? "user" : "team",
+    brandId,
+    leadTarget,
     config: { target, teamMonthlyTarget: Number(cfg.teamMonthlyTarget) || null, perUser: cfg.perUser ?? {} },
     month: {
       name: monthIdx + 1, daysElapsed: Math.floor(daysElapsed), daysLeft, daysInMonth,
