@@ -63,6 +63,10 @@ export async function GET(request: NextRequest) {
     bySource: count((l) => l.channel.category),
     byBrand: count((l) => l.brand.brandName),
     byOwner: count((l) => (l.ownerUserId ? (userName.get(l.ownerUserId) ?? `#${l.ownerUserId}`) : "ไม่มีเจ้าของ")),
-    weekly: [...weekly.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([week, n]) => ({ week, n })),
+    // Capped to the most recent 12 weeks (user req 2026-07-14: a wide date
+    // range squeezed the bars down to unreadable slivers) — the underlying
+    // totals/aggregates above still cover the full selected range, only this
+    // chart's x-axis is capped.
+    weekly: [...weekly.entries()].sort(([a], [b]) => a.localeCompare(b)).slice(-12).map(([week, n]) => ({ week, n })),
   });
 }

@@ -8,9 +8,11 @@
 //   ② Team Scorecard: per-salesperson working table, sorted worst-first.
 //   ③ Funnel + temperature + recent SLA events (kept from v1).
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import Link from "next/link";
 import { Loader2, MessageCircle, Flame, Inbox as InboxIcon, AlertOctagon } from "lucide-react";
+import { InfoTip } from "@/components/ui";
+import { useMe } from "@/components/Chrome";
 
 type Dash = {
   active: number; dueToday: number; openBreaches: number; poolWaiting: number; conflicts: number;
@@ -29,6 +31,9 @@ type Dash = {
     avgFirstResponseMin: number | null; activitiesPerDay: number; bookingsMonth: number; conversion: number | null;
   }[];
 };
+type UserRow = { userId: number; displayName: string; role: string; branchId: number | null; branchIds: number[] };
+type BrandRow = { brandId: number; brandName: string };
+type BranchRow = { branchId: number; brandId: number | null };
 
 const STAGE_ORDER = ["new", "contacted", "qualified", "appointment", "test_drive", "negotiation", "finance_check", "booking"];
 const STAGE_TH: Record<string, string> = {
@@ -48,12 +53,43 @@ const fmtResponse = (min: number | null) => {
 };
 
 export default function DashboardPage() {
+  const me = useMe();
   const [d, setD] = useState<Dash | null>(null);
   const [acting, setActing] = useState<string | null>(null);
   const [actionMsg, setActionMsg] = useState<string | null>(null);
+  const [allUsers, setAllUsers] = useState<UserRow[]>([]);
+  const [brands, setBrands] = useState<BrandRow[]>([]);
+  const [branches, setBranches] = useState<BranchRow[]>([]);
+  const [brandFilter, setBrandFilter] = useState<number | null>(null);
 
-  const load = () => fetch("/api/dashboard").then((r) => r.json()).then(setD);
-  useEffect(() => { load(); }, []);
+  const load = useCallback(() => {
+    const q = brandFilter !== null ? `?brandId=${brandFilter}` : "";
+    fetch(`/api/dashboard${q}`).then((r) => r.json()).then(setD);
+  }, [brandFilter]);
+  useEffect(() => { load(); }, [load]);
+  useEffect(() => {
+    fetch("/api/users").then((r) => r.json()).then(setAllUsers);
+    fetch("/api/branches").then((r) => r.json()).then((data) => { setBrands(data.brands ?? []); setBranches(data.branches ?? []); });
+  }, []);
+
+  // Brand chips (user req 2026-07-14, same pattern as Run Rate: a manager or
+  // sales who sells more than one brand made the scorecard's numbers an
+  // ambiguous mix — scope to exactly one brand at a time). No "all brands"
+  // combined view, same reasoning as Run Rate: auto-picks the first brand the
+  // viewer can see; single-brand viewers never see a chip bar at all.
+  const role = me?.user?.role;
+  const self = allUsers.find((u) => u.userId === me?.user?.funUserId);
+  const myOwnBranchIds = new Set([...(self?.branchIds ?? []), ...(self?.branchId ? [self.branchId] : [])]);
+  const myBrands = (() => {
+    if (!role) return [];
+    if (role === "admin" || role === "gm") return brands;
+    if (!myOwnBranchIds.size) return brands;
+    const brandIds = new Set(branches.filter((b) => myOwnBranchIds.has(b.branchId)).map((b) => b.brandId).filter((x): x is number => x !== null));
+    return brands.filter((b) => brandIds.has(b.brandId));
+  })();
+  useEffect(() => {
+    if (brandFilter === null && myBrands.length > 0) setBrandFilter(myBrands[0].brandId);
+  }, [brandFilter, myBrands]);
 
   async function slaAction(action: "nudge_again" | "reassign", leadId: number) {
     setActing(`${action}:${leadId}`); setActionMsg(null);
@@ -72,16 +108,37 @@ export default function DashboardPage() {
 
   return (
     <div className="space-y-5">
-      <div>
-        <h1 className="text-[1.7rem]">Dashboard ทีมขาย</h1>
-        <p className="text-[var(--text-2)] text-[.95rem]">สิ่งที่ต้องจัดการวันนี้ · ผลงานรายเซลส์ · สุขภาพ pipeline</p>
-        {/* SLA explainer (user req 2026-07-14: "อยากให้มีการอธิบายคำว่า SLA
-            ตรงไหนสักที่") — plain-language, once, near the top of the page
-            that uses the term the most. */}
-        <p className="text-[.76rem] text-[var(--text-3)] bg-[var(--bg)] rounded-lg px-3 py-2 mt-2 max-w-2xl">
-          💡 <b>SLA</b> (Service Level Agreement) = เกณฑ์เวลาที่ระบบตั้งไว้ว่าเซลส์ต้องติดต่อ/ติดตามลูกค้าภายในกี่วัน — ถ้าเงียบเกินเวลานี้ ระบบจะเตือนเซลส์ก่อน แล้วแจ้งผจก.ถ้ายังเงียบต่อ จนสุดท้ายจะ&quot;ริบ&quot;กลับเข้า Lead Pool ให้คนอื่นรับต่อ (เปิด/ปิดระบบนี้ได้ที่ /settings/automation)
-        </p>
+      <div className="flex items-end justify-between gap-3 flex-wrap">
+        <div>
+          <h1 className="text-[1.7rem] flex items-center gap-1.5">
+            Dashboard ทีมขาย
+            {/* SLA explainer (user req 2026-07-14: "อยากให้มีการอธิบายคำว่า SLA
+                ตรงไหนสักที่") — moved from an always-visible paragraph block
+                to a hover tip on 2026-07-14 (same-day follow-up: the note
+                text was making the page look cluttered); still "explained
+                somewhere," just on-demand now. */}
+            <InfoTip text={'SLA (Service Level Agreement) = เกณฑ์เวลาที่ระบบตั้งไว้ว่าเซลส์ต้องติดต่อ/ติดตามลูกค้าภายในกี่วัน — ถ้าเงียบเกินเวลานี้ ระบบจะเตือนเซลส์ก่อน แล้วแจ้งผจก.ถ้ายังเงียบต่อ จนสุดท้ายจะ"ริบ"กลับเข้า Lead Pool ให้คนอื่นรับต่อ (เปิด/ปิดระบบนี้ได้ที่ /settings/automation)'} />
+          </h1>
+          <p className="text-[var(--text-2)] text-[.95rem]">สิ่งที่ต้องจัดการวันนี้ · ผลงานรายเซลส์ · สุขภาพ pipeline</p>
+        </div>
       </div>
+
+      {/* Brand chips (user req 2026-07-14): every number below — scorecard
+          bookings/conversion especially — is now scoped to exactly one
+          brand at a time, same reasoning as Run Rate. */}
+      {myBrands.length > 1 && (
+        <div className="flex items-center gap-2 flex-wrap">
+          <span className="text-[11px] font-medium text-[var(--text-3)]">ยี่ห้อ</span>
+          {myBrands.map((b) => (
+            <button key={b.brandId} onClick={() => setBrandFilter(b.brandId)}
+              className={`text-[.76rem] px-3 py-1 rounded-full border transition ${
+                brandFilter === b.brandId ? "bg-[var(--accent-soft)] border-[var(--primary)] text-[var(--accent-text)] font-medium"
+                                          : "bg-white border-[var(--border-2)] text-[var(--text-2)] hover:border-[var(--text-3)]"}`}>
+              {b.brandName}
+            </button>
+          ))}
+        </div>
+      )}
 
       {/* ── ① Action Zone ─────────────────────────────────────────────── */}
       {actionMsg && (
@@ -95,12 +152,11 @@ export default function DashboardPage() {
                 <div className="flex items-center gap-2">
                   <AlertOctagon size={16} className="text-[var(--red)]" />
                   <h3 className="text-[.9rem] font-semibold text-[var(--red)]">รอ ผจก. ตัดสินใจ ({az!.escalations.length})</h3>
+                  {/* Data-source + "ยกเว้น" explainer (user req 2026-07-14:
+                      "ตารางนี้ข้อมูลมายังไง แล้วปุ่มยกเว้นไว้ทำอะไร") — hover
+                      tip, not an always-visible paragraph, since 2026-07-14. */}
+                  <InfoTip text={'Lead ที่เซลส์เงียบเกินเวลา SLA แล้วถูกแจ้งมาให้ผจก.ตัดสินใจ — "เตือนอีกครั้ง" ส่งเตือนเซลส์ซ้ำ, "ย้ายเข้า pool" ริบออกจากเซลส์คนนี้ทันที, "ยกเว้น" ไม่ใช่การปล่อยผ่านเฉยๆ แต่ต้องระบุเหตุผลก่อนถึงจะปิดเคสนี้ได้ (เช่น ลูกค้าขอเวลาคิดเพิ่ม)'} />
                 </div>
-                {/* Data-source + "ยกเว้น" explainer (user req 2026-07-14: "ตารางนี้
-                    ข้อมูลมายังไง แล้วปุ่มยกเว้นไว้ทำอะไร") */}
-                <p className="text-[.7rem] text-[var(--red)]/80 mt-1">
-                  Lead ที่เซลส์เงียบเกินเวลา SLA แล้วถูกแจ้งมาให้ผจก.ตัดสินใจ — &quot;เตือนอีกครั้ง&quot; ส่งเตือนเซลส์ซ้ำ, &quot;ย้ายเข้า pool&quot; ริบออกจากเซลส์คนนี้ทันที, &quot;ยกเว้น&quot; ไม่ใช่การปล่อยผ่านเฉยๆ แต่ต้องระบุเหตุผลก่อนถึงจะปิดเคสนี้ได้ (เช่น ลูกค้าขอเวลาคิดเพิ่ม)
-                </p>
               </div>
               {az!.escalations.map((e) => (
                 <div key={e.leadId} className="px-4 py-2.5 border-b border-[var(--border)] last:border-0 flex items-center gap-2 flex-wrap text-[.82rem]">
@@ -153,10 +209,8 @@ export default function DashboardPage() {
                 <div className="flex items-center gap-2">
                   <Flame size={16} className="text-[var(--red)]" />
                   <h3 className="text-[.9rem] font-semibold">HOT ค้างเกิน 7 วัน ({az!.staleHot.length})</h3>
+                  <InfoTip text="Lead ที่ยังตั้งอุณหภูมิ HOT อยู่ แต่ไม่มีการติดต่อ (activity) มาแล้วเกิน 7 วัน — แสดงสูงสุด 5 รายการที่เงียบนานที่สุดก่อน" />
                 </div>
-                <p className="text-[.7rem] text-[var(--text-3)] mt-1">
-                  Lead ที่ยังตั้งอุณหภูมิ HOT อยู่ แต่ไม่มีการติดต่อ (activity) มาแล้วเกิน 7 วัน — แสดงสูงสุด 5 รายการที่เงียบนานที่สุดก่อน
-                </p>
               </div>
               {az!.staleHot.map((l) => (
                 <Link key={l.leadId} href={`/lead-center`} className="px-4 py-2.5 border-b border-[var(--border)] last:border-0 flex items-center gap-2 text-[.82rem] hover:bg-[var(--surface-2)] transition">
@@ -278,12 +332,12 @@ export default function DashboardPage() {
         <div className="bg-white border border-[var(--border)] rounded-2xl shadow-[var(--shadow)] overflow-hidden">
           <div className="px-5 py-4 border-b border-[var(--border)]">
             <div className="flex items-center justify-between">
-              <h3 className="text-base">เหตุการณ์ SLA ล่าสุด</h3>
+              <h3 className="text-base flex items-center gap-1.5">
+                เหตุการณ์ SLA ล่าสุด
+                <InfoTip text="Log อัตโนมัติจากระบบตรวจ SLA ที่ทำงานทุกชั่วโมง — 10 เหตุการณ์ล่าสุด (เตือนเซลส์/แจ้งผจก./ริบเข้า pool/ไม่ตอบลูกค้าใหม่ทันเวลา) จุดเขียว = จัดการแล้ว จุดแดง = ยังไม่จัดการ" />
+              </h3>
               <Link href="/pool" className="text-[.76rem] text-[var(--accent-text)] hover:underline">ไปที่ Lead Pool →</Link>
             </div>
-            <p className="text-[.72rem] text-[var(--text-3)] mt-1">
-              Log อัตโนมัติจากระบบตรวจ SLA ที่ทำงานทุกชั่วโมง — 10 เหตุการณ์ล่าสุด (เตือนเซลส์/แจ้งผจก./ริบเข้า pool/ไม่ตอบลูกค้าใหม่ทันเวลา) จุดเขียว = จัดการแล้ว จุดแดง = ยังไม่จัดการ
-            </p>
           </div>
           {!d ? <p className="p-5 text-sm text-[var(--text-2)]">Loading…</p> :
             d.recentEvents.length === 0 ? <p className="p-5 text-sm text-[var(--text-2)]">ยังไม่มีเหตุการณ์ SLA 🎉</p> : (

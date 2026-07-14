@@ -4,7 +4,7 @@
 // CATS settings UX so Ch.Lead FUN feels familiar).
 
 import { cn } from "@/lib/utils";
-import { Check, Loader2 } from "lucide-react";
+import { Check, Loader2, Info } from "lucide-react";
 
 export const inputCls =
   "w-full px-3 py-2 text-sm bg-white border border-[var(--border)] rounded-lg focus:outline-none focus:ring-1 focus:ring-[var(--primary)]";
@@ -41,6 +41,20 @@ export function SaveButton({
     >
       {state === "saved" ? <><Check size={14} /> บันทึกแล้ว</> : state === "saving" ? <><Loader2 size={14} className="animate-spin" /> กำลังบันทึก…</> : label}
     </button>
+  );
+}
+
+// Hover/focus explainer (user req 2026-07-14: Dashboard's always-visible
+// explainer paragraphs under every section header made the page look
+// cluttered) — swaps a wordy <p> for a small icon; the text is still there,
+// just on-demand instead of permanently taking vertical space. Native
+// `title` attribute — no extra JS state, works with keyboard focus too.
+export function InfoTip({ text }: { text: string }) {
+  return (
+    <span title={text} tabIndex={0}
+      className="inline-flex items-center justify-center text-[var(--text-3)] hover:text-[var(--text-2)] cursor-help shrink-0 outline-none">
+      <Info size={13} />
+    </span>
   );
 }
 

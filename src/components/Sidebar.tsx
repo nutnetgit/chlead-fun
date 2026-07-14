@@ -237,8 +237,12 @@ export function Sidebar({ role, me, onProfileSaved }: { role: string | null; me?
 
   return (
     <>
-      {/* desktop — inside the rounded app frame */}
-      <aside className={`hidden lg:flex flex-col gap-5 shrink-0 border-r border-[var(--border)] bg-[var(--panel)] p-3.5 transition-all ${mini ? "w-[68px]" : "w-[224px]"}`}>
+      {/* desktop — inside the rounded app frame. rounded-l + overflow-hidden
+          live here (not on the app shell in Chrome.tsx) — the shell can't
+          clip without breaking position:sticky elsewhere in the page; this
+          aside is a static rectangle with no sticky descendants, so it's
+          safe to clip locally to preserve the frame's rounded left corners. */}
+      <aside className={`hidden lg:flex flex-col gap-5 shrink-0 border-r border-[var(--border)] bg-[var(--panel)] p-3.5 transition-all rounded-l-[24px] overflow-hidden ${mini ? "w-[68px]" : "w-[224px]"}`}>
         <Logo mini={mini} />
         <NavList role={role} menus={me?.user?.menus ?? null} mini={mini} onToggleMini={toggleMini} />
         <div className="flex-1" />

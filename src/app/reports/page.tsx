@@ -30,6 +30,9 @@ const CAT_TH: Record<string, string> = {
 };
 const pct = (n: number) => `${(n * 100).toFixed(0)}%`;
 const d10 = (d: Date) => d.toISOString().slice(0, 10);
+// week is the Monday-of-week date as "YYYY-MM-DD" (see /api/reports) — user
+// req 2026-07-14: display as "DD/MM/YY" instead of the previous "MM-DD".
+const fmtWeekDMY = (week: string) => { const [y, m, day] = week.split("-"); return `${day}/${m}/${y.slice(2)}`; };
 
 function AggTable({ title, rows, labelMap }: { title: string; rows: Agg[]; labelMap?: Record<string, string> }) {
   const max = Math.max(1, ...rows.map((r) => r.leads));
@@ -128,14 +131,16 @@ export default function ReportsPage() {
         ))}
       </div>
 
+      {/* Capped to 12 weeks server-side + enlarged date/count text (user req
+          2026-07-14: bars and labels were too small to read at a glance). */}
       <Card title="Lead เข้าใหม่รายสัปดาห์">
         {!d ? <p className="text-sm text-[var(--text-2)]">Loading…</p> : d.weekly.length === 0 ? <p className="text-sm text-[var(--text-2)]">ไม่มีข้อมูล</p> : (
-          <div className="flex items-end gap-1.5 h-28">
+          <div className="flex items-end gap-2 h-32">
             {d.weekly.map((w) => (
-              <div key={w.week} className="flex-1 flex flex-col items-center gap-1 min-w-0" title={`สัปดาห์ ${w.week}: ${w.n} ราย`}>
-                <span className="text-[.62rem] num text-[var(--text-3)]">{w.n}</span>
+              <div key={w.week} className="flex-1 flex flex-col items-center gap-1 min-w-0" title={`Week: ${fmtWeekDMY(w.week)} — ${w.n} ราย`}>
+                <span className="text-[.78rem] num font-medium text-[var(--text-2)]">{w.n}</span>
                 <div className="w-full bg-[var(--primary)] rounded-t-md" style={{ height: `${(w.n / maxWeek) * 80}px`, minHeight: 3 }} />
-                <span className="text-[.56rem] text-[var(--text-3)] truncate w-full text-center">{w.week.slice(5)}</span>
+                <span className="text-[.68rem] num text-[var(--text-3)] whitespace-nowrap">{fmtWeekDMY(w.week)}</span>
               </div>
             ))}
           </div>

@@ -159,20 +159,27 @@ export default function LeadCenterPage() {
         </div>
       )}
 
-      <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-3">
-        {owners.map(([key, o]) => (
-          <button key={key} onClick={() => setOwnerFilter(ownerFilter === key ? "" : key)}
-            className={`text-left bg-white border rounded-xl px-4 py-3 shadow-[var(--shadow)] transition ${
-              ownerFilter === key ? "border-[var(--primary)] ring-1 ring-[var(--primary)]" : "border-[var(--border)] hover:border-[var(--text-3)]"}`}>
-            <div className="text-[.78rem] font-medium truncate">{o.name}</div>
-            <div className="text-xl font-semibold num">{o.total}</div>
-            <div className="text-[.66rem] flex gap-1.5 flex-wrap mt-1">
-              <span className="bg-[var(--red-soft)] text-[var(--red)] rounded-full px-2 py-0.5 font-medium">HOT {o.hot}</span>
-              {o.overdue > 0 && <span className="bg-[var(--amber-soft)] text-[var(--amber)] rounded-full px-2 py-0.5 font-medium">ค้าง {o.overdue}</span>}
-              {o.conflicts > 0 && <span className="text-[var(--amber)]">⚠ {o.conflicts}</span>}
-            </div>
-          </button>
-        ))}
+      {/* Fixed at 2 rows regardless of headcount (user req 2026-07-14: with a
+          large team this used to wrap into a 3rd/4th row and push the table
+          way down) — grid-flow-col fills top-to-bottom then moves to the
+          next column, so extra salespeople extend sideways into a horizontal
+          scroll area instead of growing the page vertically. */}
+      <div className="overflow-x-auto pb-1" style={{ scrollbarWidth: "thin" }}>
+        <div className="grid grid-rows-2 grid-flow-col auto-cols-[180px] gap-3">
+          {owners.map(([key, o]) => (
+            <button key={key} onClick={() => setOwnerFilter(ownerFilter === key ? "" : key)}
+              className={`text-left bg-white border rounded-xl px-4 py-3 shadow-[var(--shadow)] transition ${
+                ownerFilter === key ? "border-[var(--primary)] ring-1 ring-[var(--primary)]" : "border-[var(--border)] hover:border-[var(--text-3)]"}`}>
+              <div className="text-[.78rem] font-medium truncate">{o.name}</div>
+              <div className="text-xl font-semibold num">{o.total}</div>
+              <div className="text-[.66rem] flex gap-1.5 flex-wrap mt-1">
+                <span className="bg-[var(--red-soft)] text-[var(--red)] rounded-full px-2 py-0.5 font-medium">HOT {o.hot}</span>
+                {o.overdue > 0 && <span className="bg-[var(--amber-soft)] text-[var(--amber)] rounded-full px-2 py-0.5 font-medium">ค้าง {o.overdue}</span>}
+                {o.conflicts > 0 && <span className="text-[var(--amber)]">⚠ {o.conflicts}</span>}
+              </div>
+            </button>
+          ))}
+        </div>
       </div>
 
       <ContactPanel leadId={selected} onClose={() => setSelected(null)} onArchiveChange={load} />

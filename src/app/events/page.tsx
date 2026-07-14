@@ -4,7 +4,7 @@
 // allocation, attending brands — with live metrics (actual leads vs target,
 // fed by leads whose campaign_id points at the event via the QR intake).
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Plus, Pencil, Trash2, Loader2, X } from "lucide-react";
 import { Card, inputCls } from "@/components/ui";
 import { fmtDate } from "@/lib/date";
@@ -63,6 +63,11 @@ export default function EventsPage() {
     draft.brandIds.length === 0 ||
     u.branchIds.some((bid) => { const brandId = branches.find((b) => b.branchId === bid)?.brandId; return brandId !== null && brandId !== undefined && draft.brandIds.includes(brandId); }));
 
+  // Scroll to the edit form on แก้ไข (user req 2026-07-14, same fix already
+  // applied to /settings/users: the form lives below a long event list, so
+  // clicking edit looked like nothing happened because it was off-screen).
+  const editFormRef = useRef<HTMLDivElement>(null);
+
   const startEdit = (e: EventRow) => {
     setEditingId(e.eventId);
     setDraft({
@@ -73,6 +78,7 @@ export default function EventsPage() {
       brandIds: e.brands.map((b) => b.brandId),
       targets: e.targets.map((t) => ({ userId: t.userId, targetLeads: t.targetLeads })),
     });
+    setTimeout(() => editFormRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 50);
   };
   const cancel = () => { setEditingId(null); setDraft(EMPTY); setError(null); };
 
@@ -182,6 +188,7 @@ export default function EventsPage() {
       ))}
       {events?.length === 0 && <p className="text-sm text-[var(--text-2)]">ยังไม่มี event — สร้างอันแรกด้านล่าง</p>}
 
+      <div ref={editFormRef} className="scroll-mt-4" />
       <Card title={editingId === null ? "สร้าง Event" : `แก้ไข Event #${editingId}`}>
         <div className="grid gap-3 md:grid-cols-2">
           <label className="block md:col-span-2">

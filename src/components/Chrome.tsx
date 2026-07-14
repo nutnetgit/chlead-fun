@@ -76,7 +76,14 @@ export function Chrome({ children }: { children: React.ReactNode }) {
     <MeContext.Provider value={me}>
       {me?.user?.mustChangePassword && <ForcePasswordChange onDone={refreshMe} />}
       <div className="min-h-screen p-2.5 md:p-5">
-        <div className="max-w-[1400px] mx-auto bg-[var(--panel)] border border-[var(--border)] rounded-[24px] shadow-[var(--shadow)] overflow-hidden flex min-h-[calc(100vh-40px)]">
+        {/* No overflow-hidden here (bug fixed 2026-07-14): it silently breaks
+            position:sticky for every descendant, since overflow:hidden makes
+            an ancestor a sticky-containment box even though this div itself
+            never scrolls (the real scroll happens at the document level) —
+            this is why the Pipeline list view's sticky detail panel wasn't
+            sticking. Corner-rounding for the sidebar (the only opaque child
+            here) is now scoped to the sidebar itself, see Sidebar.tsx. */}
+        <div className="max-w-[1400px] mx-auto bg-[var(--panel)] border border-[var(--border)] rounded-[24px] shadow-[var(--shadow)] flex min-h-[calc(100vh-40px)]">
           <Sidebar role={me?.authEnabled && me.user ? me.user.role : null} me={me} onProfileSaved={refreshMe} />
 
           <div className="flex-1 min-w-0 flex flex-col">

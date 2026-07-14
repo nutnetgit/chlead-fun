@@ -16,7 +16,7 @@ import { requireRole, managerAllowedBranchIds } from "@/lib/authz";
  */
 const DAY = 24 * 60 * 60 * 1000;
 
-export async function GET() {
+export async function GET(req: Request) {
   const rq = await requireRole(["manager", "gm", "admin"]);
   if (!rq.ok) return rq.response;
 
@@ -32,8 +32,25 @@ export async function GET() {
     const allowed = await managerAllowedBranchIds(rq.funUserId!);
     if (allowed.length) branchScope = allowed;
   }
-  const leadBranchWhere = branchScope ? { branchId: { in: branchScope } } : {};
-  const leadRelBranchWhere = branchScope ? { lead: { branchId: { in: branchScope } } } : {};
+
+  // Brand filter (user req 2026-07-14, same class of bug as Run Rate's
+  // pre-rework "combined" view: a rep who sells more than one brand made the
+  // scorecard's bookings/conversion numbers ambiguous mixes across brands).
+  // Optional ?brandId= — when set, every lead-derived query below is scoped
+  // to it in addition to the branch scope.
+  const brandIdParam = new URL(req.url).searchParams.get("brandId");
+  const brandFilter = brandIdParam ? Number(brandIdParam) : null;
+
+  const leadBranchWhere = {
+    ...(branchScope ? { branchId: { in: branchScope } } : {}),
+    ...(brandFilter ? { brandId: brandFilter } : {}),
+  };
+  const leadRelBranchWhere = {
+    lead: {
+      ...(branchScope ? { branchId: { in: branchScope } } : {}),
+      ...(brandFilter ? { brandId: brandFilter } : {}),
+    },
+  };
 
   const now = new Date();
   const startToday = new Date(now); startToday.setHours(0, 0, 0, 0);
@@ -74,7 +91,11 @@ export async function GET() {
     }),
     prisma.lead.findMany({ where: leadBranchWhere, select: { leadId: true } }),
     // ── Scorecard raw data (aggregated in JS — team sizes are small) ─────
-    prisma.funUser.findMany({ where: { isActive: 1, role: "sales", ...(branchScope ? { branchId: { in: branchScope } } : {}) } }),
+    // Branch AND brand eligibility both checked in JS below via branchLinks
+    // (fun_user_branch) + home branchId — a Prisma where on branchId alone
+    // would miss reps who only reach a branch through branchLinks, the same
+    // gap already fixed for reassign-candidate lists elsewhere in the app.
+    prisma.funUser.findMany({ where: { isActive: 1, role: "sales" }, include: { branchLinks: true } }),
     prisma.lead.findMany({
       where: { status: "active", ownerUserId: { not: null }, ...leadBranchWhere },
       select: { ownerUserId: true, nextActionAt: true, createdAt: true, firstResponseAt: true },
@@ -132,8 +153,20 @@ export async function GET() {
   const ownersForChats = ownerIds.length ? await prisma.funUser.findMany({ where: { userId: { in: ownerIds } } }) : [];
   const ownerName = new Map(ownersForChats.map((u) => [u.userId, u.nickname || u.displayName]));
 
+  // Brand-eligible reps only (when a brand filter is active) — same
+  // branchLinks-or-home-branch rule used for reassign candidates elsewhere.
+  const brandBranchIds = brandFilter
+    ? new Set((await prisma.branch.findMany({ where: { brandId: brandFilter }, select: { branchId: true } })).map((b) => b.branchId))
+    : null;
+  const scopedSalespeople = brandBranchIds
+    ? salespeople.filter((sp) => {
+        const ids = [...sp.branchLinks.map((l) => l.branchId), ...(sp.branchId !== null ? [sp.branchId] : [])];
+        return ids.some((id) => brandBranchIds.has(id));
+      })
+    : salespeople;
+
   // ── scorecard assembly ─────────────────────────────────────────────────
-  const scorecard = salespeople.map((sp) => {
+  const scorecard = scopedSalespeople.map((sp) => {
     const held = activeLeads.filter((l) => l.ownerUserId === sp.userId);
     const overdue = held.filter((l) => l.nextActionAt && l.nextActionAt < startToday).length;
     const myCohort = cohort90.filter((l) => l.ownerUserId === sp.userId);
@@ -161,6 +194,7 @@ export async function GET() {
   const daysAgo = (d: Date | null) => d ? Math.floor((now.getTime() - d.getTime()) / DAY) : null;
 
   return NextResponse.json({
+    brandId: brandFilter,
     active, dueToday, openBreaches, poolWaiting: poolWaiting.length, conflicts,
     byTemperature: Object.fromEntries(byTemp.map((t) => [t.temperature ?? "unscored", t._count])),
     byStage: Object.fromEntries(byStage.map((s) => [s.stage, s._count])),
