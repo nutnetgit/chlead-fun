@@ -11,7 +11,7 @@ import { signOut } from "next-auth/react";
 import {
   KanbanSquare, Inbox, LayoutDashboard, Users, Store, Share2, Activity, Menu, X,
   Car, ListChecks, CalendarRange, TrendingUp, FileBarChart, ScrollText, Workflow,
-  LogOut, KeyRound, ChevronDown, MapPin, UsersRound, FileText, UserCog, MessageCircle,
+  LogOut, KeyRound, ChevronDown, MapPin, UsersRound, FileText, UserCog, MessageCircle, Timer,
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import type { Me } from "@/components/Chrome";
@@ -135,6 +135,7 @@ export const SETTINGS_SUBNAV: { href: string; label: string; icon: React.ReactNo
   { href: "/settings/quotation-options", label: "ตั้งค่าใบเสนอราคา", icon: <FileText size={15} /> },
   { href: "/settings/conversion-rates", label: "Conversion Rate", icon: <TrendingUp size={15} /> },
   { href: "/channels", label: "ช่องทาง FB → LINE", icon: <Share2 size={15} /> },
+  { href: "/settings/sla-rules", label: "กฎ SLA", icon: <Timer size={15} /> },
   { href: "/settings/automation", label: "ระบบอัตโนมัติ", icon: <Workflow size={15} /> },
   { href: "/logs", label: "Log ระบบ", icon: <ScrollText size={15} /> },
   { href: "/status", label: "สถานะระบบ", icon: <Activity size={15} /> },
