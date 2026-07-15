@@ -1,5 +1,4 @@
 import { prisma } from "@/lib/prisma";
-import { linePush, buildSlaNudgeText, buildSlaEscalateBubble } from "@/lib/flex";
 import { matchSlaRule } from "@/lib/sla";
 import { isAutomationJobActive, getConversionRateConfig } from "@/lib/settings";
 
@@ -8,9 +7,12 @@ import { isAutomationJobActive, getConversionRateConfig } from "@/lib/settings";
  * handoff §5 playbook: idle → nudge sales → escalate to manager → forfeit into
  * fun_lead_pool. Also checks first-response breach (createdAt → first outbound
  * activity). Every breach is logged as a fun_sla_event — "no lead falls through
- * silently" even when there's no LINE recipient to notify yet (fun_user is
- * still empty in this environment; pushes no-op safely and the event row is
- * the source of truth regardless).
+ * silently" — and that's now the ONLY notification surface for these three
+ * (first_response_breach/idle_nudge/idle_escalate): LINE pushes for them were
+ * removed 2026-07-15 (user req — they used the single legacy LINE channel,
+ * not brand-scoped like the rest of the app since 2026-07-12). A manager
+ * reads these off the Dashboard's Action Zone / scorecard instead; forfeit,
+ * nurture, and archive never sent a LINE push to begin with.
  *
  * Design notes (choices not fully specified in the handoff, documented here):
  *  - "Idle" clock = last_activity_at, falling back to created_at when a lead
@@ -38,7 +40,6 @@ export async function runSlaJob() {
   if (!gate.active) return { ok: true, skipped: true, reason: gate.reason };
 
   const now = new Date();
-  const lineToken = process.env.LINE_CHANNEL_ACCESS_TOKEN ?? "";
 
   // ── Step 0: auto-resolve breaches where contact happened after the flag ────
   const openEvents = await prisma.slaEvent.findMany({
@@ -57,16 +58,8 @@ export async function runSlaJob() {
     }
   }
 
-  // ── Load rules + active leads + user directory (once, reused per lead) ────
+  // ── Load rules + active leads (once, reused per lead) ──────────────────
   const rules = await prisma.slaRule.findMany({ where: { isActive: 1 } });
-  const users = await prisma.funUser.findMany({ where: { isActive: 1 } });
-  const userById = new Map(users.map((u) => [u.userId, u]));
-  const managersByBranch = new Map<number, typeof users>();
-  for (const u of users) {
-    if (u.role !== "manager" && u.role !== "gm") continue;
-    if (u.branchId === null) continue;
-    managersByBranch.set(u.branchId, [...(managersByBranch.get(u.branchId) ?? []), u]);
-  }
 
   const leads = await prisma.lead.findMany({
     where: { status: "active" },
@@ -127,18 +120,16 @@ export async function runSlaJob() {
       const open = unresolvedByLead.get(String(lead.leadId)) ?? new Set<string>();
 
       // ── First-response breach ──────────────────────────────────────────
+      // No LINE push (removed 2026-07-15, user req: SLA notifications used
+      // the single legacy channel, not brand-scoped — a manager reads this
+      // off the web Dashboard's Action Zone instead). The fun_sla_event row
+      // is still the source of truth for that view either way.
       if (!lead.firstResponseAt && rule.firstResponseMinutes && !open.has("first_response_breach")) {
         const minutesWaiting = (now.getTime() - (lead.createdAt?.getTime() ?? now.getTime())) / MIN;
         if (minutesWaiting > rule.firstResponseMinutes) {
           await prisma.slaEvent.create({
             data: { leadId: lead.leadId, ruleId: rule.ruleId, eventType: "first_response_breach", notifiedTo: lead.ownerUserId },
           });
-          const owner = lead.ownerUserId ? userById.get(lead.ownerUserId) : null;
-          if (owner?.lineUserid && lineToken) {
-            await linePush(lineToken, owner.lineUserid, [
-              { type: "text", text: `🚨 ยังไม่ตอบลูกค้าใหม่!\nLead #${Number(lead.leadId)} — ${lead.person.nickname || lead.person.firstName || "ไม่ระบุชื่อ"}\nเกินเวลาตอบสนองครั้งแรกแล้ว (${rule.firstResponseMinutes} นาที) กรุณาติดต่อด่วน` },
-            ]);
-          }
           firstResponseFlagged++;
         }
       }
@@ -177,33 +168,18 @@ export async function runSlaJob() {
         continue;
       }
 
+      // Escalate/nudge: web-only now too (same 2026-07-15 change as above) —
+      // these show up in Dashboard's Action Zone ("รอ ผจก. ตัดสินใจ" /
+      // scorecard overdue counts) instead of a LINE push.
       if (rule.idleEscalateDays !== null && idleDays >= rule.idleEscalateDays && !open.has("idle_escalate")) {
         await prisma.slaEvent.create({
           data: { leadId: lead.leadId, ruleId: rule.ruleId, eventType: "idle_escalate", notifiedTo: lead.ownerUserId },
         });
-        const managers = managersByBranch.get(lead.branchId) ?? [];
-        const owner = lead.ownerUserId ? userById.get(lead.ownerUserId) : null;
-        if (lineToken && managers.length) {
-          const { altText, contents } = buildSlaEscalateBubble({
-            leadId: Number(lead.leadId), brand: lead.brand.brandName, branchCode: lead.branch.branchCode ?? lead.branch.branchName,
-            customerName: lead.person.nickname || lead.person.firstName,
-            ownerName: owner?.displayName, daysIdle: Math.floor(idleDays), temperature,
-          });
-          for (const mgr of managers) {
-            if (mgr.lineUserid) await linePush(lineToken, mgr.lineUserid, [{ type: "flex", altText, contents }]);
-          }
-        }
         escalated++;
       } else if (rule.idleNudgeDays !== null && idleDays >= rule.idleNudgeDays && !open.has("idle_nudge")) {
         await prisma.slaEvent.create({
           data: { leadId: lead.leadId, ruleId: rule.ruleId, eventType: "idle_nudge", notifiedTo: lead.ownerUserId },
         });
-        const owner = lead.ownerUserId ? userById.get(lead.ownerUserId) : null;
-        if (owner?.lineUserid && lineToken) {
-          await linePush(lineToken, owner.lineUserid, [
-            { type: "text", text: buildSlaNudgeText({ leadId: Number(lead.leadId), customerName: lead.person.nickname || lead.person.firstName, daysIdle: Math.floor(idleDays) }) },
-          ]);
-        }
         nudged++;
       }
     } catch (e) {

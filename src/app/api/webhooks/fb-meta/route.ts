@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { verifyMetaSignature, flattenLeadFields, type FbField } from "@/lib/meta";
 import { ingestLead } from "@/lib/leads";
 import { linePushFlex } from "@/lib/flex";
+import { getLineCredsForBrand } from "@/lib/lineConfig";
 
 export const runtime = "nodejs";
 
@@ -11,8 +12,10 @@ export const runtime = "nodejs";
  *   POST → verify X-Hub-Signature-256, fetch each lead from the Graph API,
  *          ingest (channel lookup + dedupe/reopen), and push the LINE card.
  *
- * Secrets come from env (LAN-only container):
- *   META_VERIFY_TOKEN · META_APP_SECRET · FB_SYSTEM_USER_TOKEN · LINE_CHANNEL_ACCESS_TOKEN
+ * Secrets come from env (LAN-only container): META_VERIFY_TOKEN ·
+ * META_APP_SECRET · FB_SYSTEM_USER_TOKEN. LINE credentials come from the
+ * ingested lead's own brand (getLineCredsForBrand) since 2026-07-15 — no
+ * longer the single legacy LINE_CHANNEL_ACCESS_TOKEN.
  *
  * AI never messages the customer — this only notifies the sales group; a human
  * sends the follow-up (handoff hard rule).
@@ -50,7 +53,6 @@ export async function POST(request: NextRequest) {
   console.log(`[fb-meta] parsed entries=${body.entry?.length ?? 0}`);
 
   const fbToken = process.env.FB_SYSTEM_USER_TOKEN ?? "";
-  const lineToken = process.env.LINE_CHANNEL_ACCESS_TOKEN ?? "";
 
   // Collect leadgen ids first so we can ACK Meta fast even if downstream is slow.
   const jobs: { leadgenId: string; pageId: string }[] = [];
@@ -77,9 +79,11 @@ export async function POST(request: NextRequest) {
       const out = await ingestLead({ source: "facebook", pageId: job.pageId, leadgenId: job.leadgenId, ...flat });
       if (!out.ok) { results.push(out.reason); continue; }
 
-      // 3. Push the card to the mapped sales group.
-      if (lineToken) {
-        const push = await linePushFlex(lineToken, out.lineGroupId, out.altText, out.flex);
+      // 3. Push the card to the mapped sales group — per-brand OA (user req
+      // 2026-07-15 — retire the single legacy channel everywhere).
+      const creds = await getLineCredsForBrand(out.brandId);
+      if (creds.accessToken) {
+        const push = await linePushFlex(creds.accessToken, out.lineGroupId, out.altText, out.flex);
         results.push(push.ok ? (out.reopen ? "reopen_sent" : "new_sent") : `push_fail:${push.status}`);
       } else {
         results.push("no_line_token");

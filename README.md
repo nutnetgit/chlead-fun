@@ -120,10 +120,11 @@ first-response-breach detection:
   moves them to `status='nurture'` once idle exceeds 2× the escalate
   threshold. **This multiplier is my own extrapolation, not specified in the
   handoff** — adjust in `route.ts` if a real number is decided later.
-- Manager escalation and salesperson nudge pushes no-op safely today because
-  `fun_user` has no rows yet (no LINE user IDs to push to) — the
-  `fun_sla_event` row is still the source of truth regardless of whether a
-  push went out.
+- First-response breach / idle nudge / idle escalate send **no LINE push**
+  (removed 2026-07-15 — they used the single legacy LINE channel, not
+  brand-scoped like the rest of the app since 2026-07-12). A manager reads
+  these off the Dashboard's Action Zone / scorecard instead; the
+  `fun_sla_event` row is the only record and the only notification surface.
 
 Tested end-to-end on the NAS with synthetic leads (backdated
 `created_at`/`last_activity_at`): nudge, escalate, forfeit, and the

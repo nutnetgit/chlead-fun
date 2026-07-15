@@ -2,6 +2,7 @@ import { prisma } from "@/lib/prisma";
 import { callGeminiJson, parseModelJson, geminiReady, geminiModel } from "@/lib/gemini";
 import { linePush, buildNudgeBubble } from "@/lib/flex";
 import { isAutomationJobActive } from "@/lib/settings";
+import { getLineCredsForBrand } from "@/lib/lineConfig";
 
 /**
  * Morning nudge (in-app cron or manual POST /api/jobs/nudge). For every active
@@ -39,9 +40,6 @@ export async function runNudgeJob() {
   });
   if (leads.length === 0) return { ok: true, nudged: 0, note: "none due today" };
   if (!geminiReady()) return { ok: false, error: "GEMINI_API_KEY not set", due: leads.length };
-
-  const lineToken = process.env.LINE_CHANNEL_ACCESS_TOKEN;
-  if (!lineToken) return { ok: false, error: "LINE token not set", due: leads.length };
 
   // Destination group per lead via fun_channel_config (brand string + branch code).
   const configs = await prisma.channelConfig.findMany({ where: { active: 1 } });
@@ -86,6 +84,12 @@ export async function runNudgeJob() {
     const group = groupFor(lead.brand.brandName, lead.branch.branchCode ?? lead.branch.branchName);
     if (!draft || !group) { skipped.push(`${idNum}:${!draft ? "no_draft" : "no_group"}`); continue; }
 
+    // Per-brand OA (user req 2026-07-15 — retire the single legacy channel
+    // everywhere; this was the original "check item 3" complaint — the sales
+    // group push was going out as one bot for every brand's group).
+    const creds = await getLineCredsForBrand(lead.brandId);
+    if (!creds.accessToken) { skipped.push(`${idNum}:no_token`); continue; }
+
     const { altText, contents } = buildNudgeBubble({
       leadId: idNum,
       brand: lead.brand.brandName,
@@ -94,7 +98,7 @@ export async function runNudgeJob() {
       modelInterest: lead.interestedVariant,
       score: lead.temperature,
     });
-    const push = await linePush(lineToken, group, [
+    const push = await linePush(creds.accessToken, group, [
       { type: "text", text: draft },
       { type: "flex", altText, contents },
     ]);

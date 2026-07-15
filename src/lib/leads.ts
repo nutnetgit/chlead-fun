@@ -27,6 +27,7 @@ export type IngestResult =
       ok: true;
       reopen: boolean;
       leadId: number;
+      brandId: number;
       lineGroupId: string;
       altText: string;
       flex: Record<string, unknown>;
@@ -190,5 +191,5 @@ export async function ingestLead(input: LeadInput): Promise<IngestResult> {
     rawMessage: input.rawMessage,
   });
 
-  return { ok: true, reopen, leadId: Number(leadId), lineGroupId: cfg.lineGroupId, altText, flex: contents };
+  return { ok: true, reopen, leadId: Number(leadId), brandId: brand.brandId, lineGroupId: cfg.lineGroupId, altText, flex: contents };
 }

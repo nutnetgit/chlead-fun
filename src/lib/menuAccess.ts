@@ -23,7 +23,7 @@
 export type MenuKey =
   | "leads" | "chat" | "pool"
   | "dashboard" | "lead-center" | "runrate" | "events" | "reports"
-  | "settings-teams" | "settings-models" | "settings-quotation" | "settings-conversion-rate"
+  | "settings-teams" | "settings-models" | "settings-quotation" | "settings-conversion-rate" | "settings-sla-rules"
   | "settings";
 
 export const MENU_DEFS: { key: MenuKey; label: string; roles: string[] | null }[] = [
@@ -45,6 +45,15 @@ export const MENU_DEFS: { key: MenuKey; label: string; roles: string[] | null }[
   { key: "settings-models", label: "ตั้งค่า: รุ่นรถและสี", roles: ["manager", "gm", "admin"] },
   { key: "settings-quotation", label: "ตั้งค่า: ใบเสนอราคา", roles: ["manager", "gm", "admin"] },
   { key: "settings-conversion-rate", label: "ตั้งค่า: Conversion Rate", roles: ["manager", "gm", "admin"] },
+  // Split out from the admin catch-all (user req 2026-07-15) so a manager
+  // can be granted SLA rule access without also getting users/branches/
+  // automation/etc. A manager's write access here is scoped server-side to
+  // brands they manage (see /api/settings/sla-rules) — same rule as
+  // settings-models. NOT the same thing as the "SLA Engine" on/off toggle on
+  // /settings/automation (still in the admin-only "settings" bundle below) —
+  // that just flips whether the hourly job runs at all; this page sets the
+  // actual day/minute thresholds the job uses when it does run.
+  { key: "settings-sla-rules", label: "ตั้งค่า: กฎ SLA", roles: ["manager", "gm", "admin"] },
   // Everything else under /settings (users, branches, LINE OA, sources,
   // channels, automation, logs, status) — admin/gm only, unchanged.
   { key: "settings", label: "ตั้งค่า (ส่วนแอดมิน)", roles: ["admin", "gm"] },
@@ -84,6 +93,7 @@ const PATH_MENU: [string, MenuKey][] = [
   ["/settings/models", "settings-models"],
   ["/settings/quotation-options", "settings-quotation"],
   ["/settings/conversion-rates", "settings-conversion-rate"],
+  ["/settings/sla-rules", "settings-sla-rules"],
   ["/settings", "settings"],
   ["/channels", "settings"],
   ["/logs", "settings"],
@@ -106,6 +116,7 @@ const SETTINGS_LANDING: { key: MenuKey; href: string }[] = [
   { key: "settings-models", href: "/settings/models" },
   { key: "settings-quotation", href: "/settings/quotation-options" },
   { key: "settings-conversion-rate", href: "/settings/conversion-rates" },
+  { key: "settings-sla-rules", href: "/settings/sla-rules" },
 ];
 
 export function settingsLandingHref(menus: string[] | null | undefined): string | null {

@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireRole } from "@/lib/authz";
 import { handleSlaPostback, type PostbackAction } from "@/lib/governance";
+import { getLineCredsForBrand } from "@/lib/lineConfig";
+import { linePush } from "@/lib/flex";
 
 /**
  * Web-side twin of the LINE SLA-escalate card buttons (dashboard Action Zone,
@@ -26,14 +28,12 @@ export async function POST(request: NextRequest) {
   // work there (soft-launch parity with the rest of the app), just unattributed.
   const result = await handleSlaPostback(action, BigInt(b.leadId), rq.funUserId ?? 0);
 
+  // Per-brand OA (user req 2026-07-15 — retire the single legacy channel
+  // everywhere; this was the last staff-facing push still hardcoded to it).
   if (result.pushToOwner) {
-    const token = process.env.LINE_CHANNEL_ACCESS_TOKEN ?? "";
-    if (token) {
-      await fetch("https://api.line.me/v2/bot/message/push", {
-        method: "POST",
-        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-        body: JSON.stringify({ to: result.pushToOwner.lineUserid, messages: [{ type: "text", text: result.pushToOwner.text }] }),
-      }).catch(() => {});
+    const creds = await getLineCredsForBrand(result.pushToOwner.brandId);
+    if (creds.accessToken) {
+      await linePush(creds.accessToken, result.pushToOwner.lineUserid, [{ type: "text", text: result.pushToOwner.text }]).catch(() => {});
     }
   }
 

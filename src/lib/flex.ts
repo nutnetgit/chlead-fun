@@ -105,61 +105,6 @@ export function buildNudgeBubble(opts: {
   return { altText: `📋 ตามลูกค้า: ${opts.customerName || "ไม่ระบุชื่อ"}`, contents };
 }
 
-// SLA nudge to the owning salesperson — plain text reminder (no draft message
-// here; the AI draft comes from WF3 nudge, this is just "you're overdue").
-export function buildSlaNudgeText(opts: {
-  leadId: number;
-  customerName?: string | null;
-  daysIdle: number;
-}): string {
-  return `⏰ เตือนติดตามลูกค้า\nLead #${opts.leadId} — ${opts.customerName || "ไม่ระบุชื่อ"}\nไม่มีการติดต่อมา ${opts.daysIdle} วันแล้ว กรุณาติดตามลูกค้าด่วน`;
-}
-
-// Manager escalation — SLA breach with 3 quick-action buttons (handoff §5
-// playbook). Postback data carries the lead id; a WF4-style handler resolves
-// the fun_sla_event this card is tied to.
-export function buildSlaEscalateBubble(opts: {
-  leadId: number;
-  brand: string;
-  branchCode: string;
-  customerName?: string | null;
-  ownerName?: string | null;
-  daysIdle: number;
-  temperature?: string | null;
-}): { altText: string; contents: Record<string, unknown> } {
-  const brandLabel = BRAND_LABELS[opts.brand as BrandKey] ?? opts.brand;
-  const btn = (label: string, action: string, style: string) => ({
-    type: "button", style, height: "sm",
-    action: { type: "postback", label, data: `action=${action}&lead=${opts.leadId}`, displayText: label },
-  });
-  const contents = {
-    type: "bubble",
-    header: {
-      type: "box", layout: "vertical", backgroundColor: "#B7472E", paddingAll: "12px",
-      contents: [
-        { type: "text", text: "🚨 หลุด SLA — ต้องตัดสินใจ", weight: "bold", color: "#FFFFFF", size: "md" },
-        { type: "text", text: `${brandLabel} · สาขา ${opts.branchCode}`, color: "#FBD8CE", size: "xs" },
-      ],
-    },
-    body: {
-      type: "box", layout: "vertical", spacing: "sm",
-      contents: [
-        { type: "text", text: `👤 ${opts.customerName || "ไม่ระบุชื่อ"}`, weight: "bold", size: "sm", wrap: true },
-        { type: "text", text: `เซลส์: ${opts.ownerName || "ไม่มีเจ้าของ"}`, size: "xs", color: "#8C8C8C" },
-        { type: "text", text: `ไม่มีการติดต่อมา ${opts.daysIdle} วัน${opts.temperature ? ` · ${opts.temperature.toUpperCase()}` : ""}`, size: "xs", color: "#B7472E" },
-      ],
-    },
-    footer: {
-      type: "box", layout: "vertical", spacing: "xs",
-      contents: [
-        { type: "box", layout: "horizontal", spacing: "xs", contents: [btn("เตือนอีกครั้ง", "nudge_again", "secondary"), btn("ย้ายเซลส์", "reassign", "primary")] },
-        btn("ยกเว้น (ต้องระบุเหตุผล)", "exempt", "secondary"),
-      ],
-    },
-  };
-  return { altText: `🚨 หลุด SLA: ${opts.customerName || "ไม่ระบุชื่อ"} (${opts.daysIdle} วัน)`, contents };
-}
-
 export type NewLeadCard = {
   brand: string;
   branchCode: string;

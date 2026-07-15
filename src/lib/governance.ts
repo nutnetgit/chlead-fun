@@ -4,7 +4,7 @@ export type PostbackAction = "nudge_again" | "reassign" | "exempt";
 
 export type PostbackResult = {
   replyText: string;
-  pushToOwner?: { lineUserid: string; text: string };
+  pushToOwner?: { lineUserid: string; text: string; brandId: number };
 };
 
 const APP_URL = process.env.APP_PUBLIC_URL || "https://fun.ch-erawan.com";
@@ -40,7 +40,7 @@ export async function handleSlaPostback(action: PostbackAction, leadId: bigint, 
       return {
         replyText: `✅ ส่งเตือนอีกครั้งให้ ${owner?.displayName ?? "เซลส์"} แล้ว — Lead #${Number(leadId)} (${custName})`,
         pushToOwner: owner?.lineUserid
-          ? { lineUserid: owner.lineUserid, text: `⏰ ผจก. เตือนให้ติดตามลูกค้าด่วน\nLead #${Number(leadId)} — ${custName}\nกรุณาติดต่อภายในวันนี้` }
+          ? { lineUserid: owner.lineUserid, text: `⏰ ผจก. เตือนให้ติดตามลูกค้าด่วน\nLead #${Number(leadId)} — ${custName}\nกรุณาติดต่อภายในวันนี้`, brandId: lead.brandId }
           : undefined,
       };
     }

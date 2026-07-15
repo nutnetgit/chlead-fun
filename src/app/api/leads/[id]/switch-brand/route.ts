@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireLeadAccess } from "@/lib/authz";
 import { linePush } from "@/lib/flex";
+import { getLineCredsForBrand } from "@/lib/lineConfig";
 
 export const runtime = "nodejs";
 
@@ -91,25 +92,34 @@ export async function POST(request: NextRequest, { params }: Ctx) {
     data: { leadId, fromStage: lead.stage, toStage: "lost", changedBy: byUserId, note: `ย้ายไปจบที่ ${brand.brandName} (Lead ใหม่ #${Number(newLead.leadId)})` },
   });
 
-  // 3. Visibility guardrail: DM managers of BOTH branches.
-  const lineToken = process.env.LINE_CHANNEL_ACCESS_TOKEN ?? "";
+  // 3. Visibility guardrail: DM managers of BOTH branches — spans two brands
+  // by definition (that's the whole point of this endpoint), so this can't
+  // use one single brand's OA. Each side's managers get pinged from THEIR
+  // OWN brand's OA instead (user req 2026-07-15 — retire the single legacy
+  // channel everywhere; old/new managers are disjoint sets in practice, but
+  // a manager present in both gets pushed once per side, which is fine —
+  // it's the same visibility guardrail firing twice, not a duplicate bug).
   const custName = lead.person.nickname || lead.person.firstName || "ลูกค้า";
   const owner = lead.ownerUserId ? await prisma.funUser.findUnique({ where: { userId: lead.ownerUserId } }) : null;
-  if (lineToken) {
+  const msg = `🔁 ย้ายยี่ห้อ: ${custName}\n${lead.brand.brandName} → ${brand.brandName} (${branch.branchName})\nเซลส์: ${owner?.displayName ?? "ไม่ระบุ"}${note ? `\nเหตุผล: ${note}` : ""}\nLead ใหม่ #${Number(newLead.leadId)}`;
+
+  const pushToBranchManagers = async (scopeBranchId: number, brandIdForCreds: number) => {
+    const creds = await getLineCredsForBrand(brandIdForCreds);
+    if (!creds.accessToken) return;
     const managers = await prisma.funUser.findMany({
       where: {
         role: { in: ["manager", "gm"] }, isActive: 1, lineUserid: { not: null },
-        OR: [
-          { branchId: { in: [lead.branchId, branchId] } },
-          { branchLinks: { some: { branchId: { in: [lead.branchId, branchId] } } } },
-        ],
+        OR: [{ branchId: scopeBranchId }, { branchLinks: { some: { branchId: scopeBranchId } } }],
       },
     });
-    const msg = `🔁 ย้ายยี่ห้อ: ${custName}\n${lead.brand.brandName} → ${brand.brandName} (${branch.branchName})\nเซลส์: ${owner?.displayName ?? "ไม่ระบุ"}${note ? `\nเหตุผล: ${note}` : ""}\nLead ใหม่ #${Number(newLead.leadId)}`;
     for (const mgr of managers) {
-      if (mgr.lineUserid) await linePush(lineToken, mgr.lineUserid, [{ type: "text", text: msg }]);
+      if (mgr.lineUserid) await linePush(creds.accessToken, mgr.lineUserid, [{ type: "text", text: msg }]);
     }
-  }
+  };
+  await Promise.all([
+    pushToBranchManagers(lead.branchId, lead.brandId),
+    pushToBranchManagers(branchId, brandId),
+  ]);
 
   return NextResponse.json({ ok: true, newLeadId: Number(newLead.leadId) }, { status: 201 });
 }

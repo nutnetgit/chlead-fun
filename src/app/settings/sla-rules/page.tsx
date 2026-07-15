@@ -9,6 +9,7 @@ import { useEffect, useRef, useState } from "react";
 import { Plus, Pencil, Loader2, X, Trash2 } from "lucide-react";
 import { Card, Toggle, inputCls } from "@/components/ui";
 import { SettingsShell } from "@/components/SettingsShell";
+import { useMe } from "@/components/Chrome";
 
 type BrandRow = { brandId: number; brandName: string };
 type BranchRow = { branchId: number; branchName: string; brandId: number | null };
@@ -52,6 +53,8 @@ const specificity = (r: RuleRow) =>
   (r.applyChannelCategory ? 2 : 0) + (r.applyTemperature !== "any" ? 1 : 0);
 
 export default function SlaRulesPage() {
+  const me = useMe();
+  const isManager = me?.user?.role === "manager";
   const [rules, setRules] = useState<RuleRow[] | null>(null);
   const [brands, setBrands] = useState<BrandRow[]>([]);
   const [branches, setBranches] = useState<BranchRow[]>([]);
@@ -177,9 +180,14 @@ export default function SlaRulesPage() {
         <Card title={editingId === null ? "เพิ่มกฎ SLA" : `แก้ไขกฎ #${editingId}`}>
           <div className="grid gap-3 md:grid-cols-3">
             <label className="block">
-              <span className="text-[11px] font-medium text-[var(--text-2)] mb-1 block">แบรนด์ (ว่าง = ทุกแบรนด์)</span>
+              <span className="text-[11px] font-medium text-[var(--text-2)] mb-1 block">
+                แบรนด์{isManager ? " *" : " (ว่าง = ทุกแบรนด์)"}
+              </span>
               <select value={draft.scopeBrandId} onChange={(e) => setDraft({ ...draft, scopeBrandId: e.target.value, scopeBranchId: "" })} className={inputCls}>
-                <option value="">— ทุกแบรนด์ —</option>
+                {/* Managers must pick a brand they manage — no global-rule
+                    option (user req 2026-07-15: a manager's SLA rules are
+                    scoped to their own brands, same as /settings/models). */}
+                {!isManager && <option value="">— ทุกแบรนด์ —</option>}
                 {brands.map((b) => <option key={b.brandId} value={b.brandId}>{b.brandName}</option>)}
               </select>
             </label>

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { requireRole } from "@/lib/authz";
+import { requireRole, managerAllowedBrandIds } from "@/lib/authz";
 
 type Ctx = { params: Promise<{ id: string }> };
 
@@ -13,8 +13,24 @@ function toIntOrNull(v: unknown): number | null | undefined {
   return undefined;
 }
 
+// A manager may only touch a rule that's already scoped to a brand they
+// manage (not global rules, not other brands' rules) — same restriction as
+// creating one. Returns an error response to short-circuit, or null if OK.
+async function checkManagerScope(rq: { role: string | null; funUserId: number | null }, ruleId: number, nextBrandId: number | null | undefined) {
+  if (rq.role !== "manager") return null;
+  const allowed = await managerAllowedBrandIds(rq.funUserId!);
+  const existing = await prisma.slaRule.findUnique({ where: { ruleId } });
+  if (!existing || existing.scopeBrandId === null || !allowed.includes(existing.scopeBrandId)) {
+    return NextResponse.json({ error: "ไม่มีสิทธิ์แก้ไขกฎนี้" }, { status: 403 });
+  }
+  if (nextBrandId !== undefined && (nextBrandId === null || !allowed.includes(nextBrandId))) {
+    return NextResponse.json({ error: "ไม่มีสิทธิ์ตั้งกฎ SLA ของแบรนด์นี้" }, { status: 403 });
+  }
+  return null;
+}
+
 export async function PUT(request: NextRequest, { params }: Ctx) {
-  const rq = await requireRole(["admin", "gm"]);
+  const rq = await requireRole(["manager", "gm", "admin"]);
   if (!rq.ok) return rq.response;
 
   const { id } = await params;
@@ -22,6 +38,11 @@ export async function PUT(request: NextRequest, { params }: Ctx) {
   if (!Number.isInteger(ruleId)) return NextResponse.json({ error: "bad id" }, { status: 400 });
 
   const b = (await request.json().catch(() => ({}))) as Record<string, unknown>;
+
+  const nextBrandId = typeof b.scopeBrandId === "number" ? b.scopeBrandId : b.scopeBrandId === null ? null : undefined;
+  const scopeErr = await checkManagerScope(rq, ruleId, nextBrandId);
+  if (scopeErr) return scopeErr;
+
   const data: Record<string, unknown> = {};
 
   if (typeof b.scopeBrandId === "number" || b.scopeBrandId === null) data.scopeBrandId = b.scopeBrandId;
@@ -60,12 +81,15 @@ export async function PUT(request: NextRequest, { params }: Ctx) {
 // that's ever been matched by the SLA engine can't be hard-deleted; toggle
 // isActive off instead so history stays intact (same policy as branches).
 export async function DELETE(_request: NextRequest, { params }: Ctx) {
-  const rq = await requireRole(["admin", "gm"]);
+  const rq = await requireRole(["manager", "gm", "admin"]);
   if (!rq.ok) return rq.response;
 
   const { id } = await params;
   const ruleId = Number(id);
   if (!Number.isInteger(ruleId)) return NextResponse.json({ error: "bad id" }, { status: 400 });
+
+  const scopeErr = await checkManagerScope(rq, ruleId, undefined);
+  if (scopeErr) return scopeErr;
 
   const eventsUsingRule = await prisma.slaEvent.count({ where: { ruleId } });
   if (eventsUsingRule) {

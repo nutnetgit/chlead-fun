@@ -2,6 +2,7 @@ import { prisma } from "@/lib/prisma";
 import { callGeminiJson, parseModelJson, geminiReady, geminiModel } from "@/lib/gemini";
 import { linePush } from "@/lib/flex";
 import { isAutomationJobActive } from "@/lib/settings";
+import { getLineCredsForBrand } from "@/lib/lineConfig";
 
 /**
  * Morning manager digest by น้องไอรา (Aira) — the org's named AI assistant
@@ -70,15 +71,26 @@ export async function runDigestJob() {
       `จุดที่ควรจี้วันนี้: ${overdueHot.length ? "เคลียร์ HOT ที่ค้างก่อนค่ะ" : "ตามนัดวันนี้ให้ครบค่ะ"}`;
   }
 
-  // Push to every manager/gm with a linked LINE.
+  // Push to every manager/gm with a linked LINE — sent from THEIR OWN home
+  // branch's brand OA (user req 2026-07-15 — retire the single legacy
+  // channel everywhere). A digest is company-wide in content, but there's no
+  // single "right" brand to send it from, so each manager's home branch is
+  // the least-arbitrary choice; getLineCredsForBrand already falls back to
+  // the legacy channel for any brand that hasn't configured its own OA yet,
+  // so a manager with no home branch still gets the digest, just via the
+  // fallback rather than a specific brand's identity.
   const managers = await prisma.funUser.findMany({
     where: { role: { in: ["manager", "gm"] }, isActive: 1, lineUserid: { not: null } },
   });
-  const lineToken = process.env.LINE_CHANNEL_ACCESS_TOKEN ?? "";
+  const branches = await prisma.branch.findMany({ select: { branchId: true, brandId: true } });
+  const brandIdByBranch = new Map(branches.map((b) => [b.branchId, b.brandId]));
   let pushed = 0;
   for (const mgr of managers) {
-    if (!lineToken || !mgr.lineUserid) continue;
-    const r = await linePush(lineToken, mgr.lineUserid, [{ type: "text", text }]);
+    if (!mgr.lineUserid) continue;
+    const brandId = mgr.branchId !== null ? brandIdByBranch.get(mgr.branchId) ?? null : null;
+    const creds = await getLineCredsForBrand(brandId ?? -1);
+    if (!creds.accessToken) continue;
+    const r = await linePush(creds.accessToken, mgr.lineUserid, [{ type: "text", text }]);
     if (r.ok) pushed++;
   }
 
