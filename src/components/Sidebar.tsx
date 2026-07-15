@@ -123,22 +123,50 @@ const SECTIONS: { caption: string; roles: string[] | null; items: Item[] }[] = [
 
 // Sub-pages that live "inside" the single Settings nav item (shown as an
 // inner column by SettingsShell — user req 2026-07-08: consolidate the
-// growing settings list under one menu entry). Kept here so Sidebar's
-// active-state check and the shell's sub-nav share one source of truth.
-export const SETTINGS_SUBNAV: { href: string; label: string; icon: React.ReactNode }[] = [
-  { href: "/settings/users", label: "ผู้ใช้และสิทธิ์", icon: <Users size={15} /> },
-  { href: "/settings/teams", label: "ทีมขาย", icon: <UsersRound size={15} /> },
-  { href: "/settings/branches", label: "สาขาและแบรนด์", icon: <Store size={15} /> },
-  { href: "/settings/line-oa", label: "LINE OA แต่ละยี่ห้อ", icon: <MessageCircle size={15} /> },
-  { href: "/settings/models", label: "รุ่นรถและสี", icon: <Car size={15} /> },
-  { href: "/settings/sources", label: "แหล่งที่มาลูกค้า", icon: <MapPin size={15} /> },
-  { href: "/settings/quotation-options", label: "ตั้งค่าใบเสนอราคา", icon: <FileText size={15} /> },
-  { href: "/settings/conversion-rates", label: "Conversion Rate", icon: <TrendingUp size={15} /> },
-  { href: "/channels", label: "ช่องทาง FB → LINE", icon: <Share2 size={15} /> },
-  { href: "/settings/sla-rules", label: "กฎ SLA", icon: <Timer size={15} /> },
-  { href: "/settings/automation", label: "ระบบอัตโนมัติ", icon: <Workflow size={15} /> },
-  { href: "/logs", label: "Log ระบบ", icon: <ScrollText size={15} /> },
-  { href: "/status", label: "สถานะระบบ", icon: <Activity size={15} /> },
+// growing settings list under one menu entry).
+//
+// Grouped into a 2-row grid (user req 2026-07-15: 13 tabs in one scrolling
+// row meant the leftmost items took a real scroll to reach) — 4 topic
+// groups, 2 per row, a thin vertical divider between the two groups on each
+// row. SettingsShell renders this shape directly.
+export const SETTINGS_SUBNAV_GROUPS: { label: string; items: { href: string; label: string; icon: React.ReactNode }[] }[][] = [
+  [
+    {
+      label: "องค์กร",
+      items: [
+        { href: "/settings/users", label: "ผู้ใช้และสิทธิ์", icon: <Users size={15} /> },
+        { href: "/settings/teams", label: "ทีมขาย", icon: <UsersRound size={15} /> },
+        { href: "/settings/branches", label: "สาขาและแบรนด์", icon: <Store size={15} /> },
+      ],
+    },
+    {
+      label: "การขาย",
+      items: [
+        { href: "/settings/models", label: "รุ่นรถและสี", icon: <Car size={15} /> },
+        { href: "/settings/sources", label: "แหล่งที่มาลูกค้า", icon: <MapPin size={15} /> },
+        { href: "/settings/quotation-options", label: "ตั้งค่าใบเสนอราคา", icon: <FileText size={15} /> },
+        { href: "/settings/conversion-rates", label: "Conversion Rate", icon: <TrendingUp size={15} /> },
+      ],
+    },
+  ],
+  [
+    {
+      label: "LINE",
+      items: [
+        { href: "/settings/line-oa", label: "LINE OA แต่ละยี่ห้อ", icon: <MessageCircle size={15} /> },
+        { href: "/channels", label: "ช่องทาง FB → LINE", icon: <Share2 size={15} /> },
+      ],
+    },
+    {
+      label: "ระบบ",
+      items: [
+        { href: "/settings/sla-rules", label: "กฎ SLA", icon: <Timer size={15} /> },
+        { href: "/settings/automation", label: "ระบบอัตโนมัติ", icon: <Workflow size={15} /> },
+        { href: "/logs", label: "Log ระบบ", icon: <ScrollText size={15} /> },
+        { href: "/status", label: "สถานะระบบ", icon: <Activity size={15} /> },
+      ],
+    },
+  ],
 ];
 const SETTINGS_PREFIXES = ["/settings", "/channels", "/logs", "/status"];
 
