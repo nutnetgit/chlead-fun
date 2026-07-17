@@ -7,17 +7,27 @@
 import { useEffect, useState, useCallback } from "react";
 import { Download } from "lucide-react";
 import { Card, inputCls } from "@/components/ui";
+import { useMe } from "@/components/Chrome";
 
 type Agg = { key: string; leads: number; booked: number; rate: number };
+type WeeklyBySource = { categories: string[]; weeks: { week: string; counts: Record<string, number> }[] };
 type Data = {
   range: { from: string; to: string };
   totals: { leads: number; booked: number; lost: number; active: number; conflicts: number };
   byStage: Agg[]; bySource: Agg[]; byBrand: Agg[]; byOwner: Agg[];
   weekly: { week: string; n: number }[];
+  weeklyBySource: WeeklyBySource;
 };
 type BranchRow = { branchId: number; branchName: string; brandId: number | null; isActive: boolean };
 type BrandRow = { brandId: number; brandName: string };
-type UserRow = { userId: number; displayName: string; role: string };
+type UserRow = { userId: number; displayName: string; role: string; branchId: number | null; branchIds: number[] };
+
+// Distinct, stable colors per channel category so the same category always
+// reads as the same color across the weekly-by-channel chart.
+const SOURCE_COLOR: Record<string, string> = {
+  walkin: "#F3B01C", phone: "#6B8CB8", online_owned: "#3E8E63", online_paid: "#C24E33",
+  oem: "#A16E12", event: "#8A5CF6", referral: "#22B8CF", service: "#B57F06", fleet: "#5C6B73", unknown: "#9B968A",
+};
 
 const STAGE_TH: Record<string, string> = {
   new: "Lead ใหม่", contacted: "ติดต่อแล้ว", qualified: "คัดกรอง", appointment: "นัดหมาย",
@@ -57,6 +67,7 @@ function AggTable({ title, rows, labelMap }: { title: string; rows: Agg[]; label
 }
 
 export default function ReportsPage() {
+  const me = useMe();
   const now = new Date();
   const [f, setF] = useState({
     from: d10(new Date(now.getTime() - 90 * 864e5)), to: d10(now),
@@ -81,6 +92,20 @@ export default function ReportsPage() {
   }, []);
   useEffect(() => { setD(null); fetch(`/api/reports?${qs()}`).then((r) => r.json()).then(setD); }, [qs]);
 
+  // Scope the filter dropdowns themselves (user req 2026-07-15: a manager
+  // shouldn't even be able to PICK a brand/branch/salesperson outside what
+  // they manage, not just get an empty result if they somehow did) — same
+  // pattern as Dashboard's brand chips.
+  const role = me?.user?.role;
+  const self = users.find((u) => u.userId === me?.user?.funUserId);
+  const myOwnBranchIds = new Set([...(self?.branchIds ?? []), ...(self?.branchId ? [self.branchId] : [])]);
+  const unrestricted = !role || role === "admin" || role === "gm" || myOwnBranchIds.size === 0;
+  const myBranches = unrestricted ? branches : branches.filter((b) => myOwnBranchIds.has(b.branchId));
+  const myBrandIds = new Set(myBranches.map((b) => b.brandId).filter((x): x is number => x !== null));
+  const myBrands = unrestricted ? brands : brands.filter((b) => myBrandIds.has(b.brandId));
+  const myUsers = unrestricted ? users : users.filter((u) =>
+    u.branchId !== null && myOwnBranchIds.has(u.branchId) || u.branchIds.some((id) => myOwnBranchIds.has(id)));
+
   const maxWeek = Math.max(1, ...(d?.weekly.map((w) => w.n) ?? [1]));
 
   return (
@@ -103,16 +128,16 @@ export default function ReportsPage() {
           <input type="date" value={f.to} onChange={(e) => setF({ ...f, to: e.target.value })} className={inputCls} /></label>
         <label className="block"><span className="text-[11px] text-[var(--text-2)] block mb-1">แบรนด์</span>
           <select value={f.brandId} onChange={(e) => setF({ ...f, brandId: e.target.value, branchId: "" })} className={inputCls}>
-            <option value="">ทั้งหมด</option>{brands.map((b) => <option key={b.brandId} value={b.brandId}>{b.brandName}</option>)}
+            <option value="">ทั้งหมด</option>{myBrands.map((b) => <option key={b.brandId} value={b.brandId}>{b.brandName}</option>)}
           </select></label>
         <label className="block"><span className="text-[11px] text-[var(--text-2)] block mb-1">สาขา</span>
           <select value={f.branchId} onChange={(e) => setF({ ...f, branchId: e.target.value })} className={inputCls}>
             <option value="">ทั้งหมด</option>
-            {branches.filter((b) => !f.brandId || b.brandId === Number(f.brandId)).map((b) => <option key={b.branchId} value={b.branchId}>{b.branchName}</option>)}
+            {myBranches.filter((b) => !f.brandId || b.brandId === Number(f.brandId)).map((b) => <option key={b.branchId} value={b.branchId}>{b.branchName}</option>)}
           </select></label>
         <label className="block"><span className="text-[11px] text-[var(--text-2)] block mb-1">เซลส์</span>
           <select value={f.ownerId} onChange={(e) => setF({ ...f, ownerId: e.target.value })} className={inputCls}>
-            <option value="">ทั้งหมด</option>{users.map((u) => <option key={u.userId} value={u.userId}>{u.displayName}</option>)}
+            <option value="">ทั้งหมด</option>{myUsers.map((u) => <option key={u.userId} value={u.userId}>{u.displayName}</option>)}
           </select></label>
       </div>
 
@@ -144,6 +169,44 @@ export default function ReportsPage() {
               </div>
             ))}
           </div>
+        )}
+      </Card>
+
+      {/* Weekly trend split by channel (user req 2026-07-15: "วัดประสิทธิภาพ
+          ของ lead ตามช่องทางต่างๆ") — stacked bars, same 12-week window and
+          scale as the overall chart above so the two read side by side. */}
+      <Card title="Lead เข้าใหม่รายสัปดาห์ แยกตามช่องทาง">
+        {!d ? <p className="text-sm text-[var(--text-2)]">Loading…</p> : d.weeklyBySource.weeks.length === 0 ? <p className="text-sm text-[var(--text-2)]">ไม่มีข้อมูล</p> : (
+          <>
+            <div className="flex items-end gap-2 h-32">
+              {d.weeklyBySource.weeks.map((w) => {
+                const total = d.weeklyBySource.categories.reduce((s, c) => s + (w.counts[c] ?? 0), 0);
+                const title = [`Week: ${fmtWeekDMY(w.week)} — ${total} ราย`,
+                  ...d.weeklyBySource.categories.filter((c) => w.counts[c]).map((c) => `${CAT_TH[c] ?? c}: ${w.counts[c]}`)].join("\n");
+                return (
+                  <div key={w.week} className="flex-1 flex flex-col items-center gap-1 min-w-0" title={title}>
+                    <span className="text-[.78rem] num font-medium text-[var(--text-2)]">{total}</span>
+                    <div className="w-full flex flex-col-reverse rounded-t-md overflow-hidden" style={{ height: `${(total / maxWeek) * 80}px`, minHeight: total ? 3 : 0 }}>
+                      {d.weeklyBySource.categories.map((c) => {
+                        const n = w.counts[c] ?? 0;
+                        if (!n) return null;
+                        return <div key={c} style={{ height: `${(n / (total || 1)) * 100}%`, background: SOURCE_COLOR[c] ?? "#9B968A" }} />;
+                      })}
+                    </div>
+                    <span className="text-[.68rem] num text-[var(--text-3)] whitespace-nowrap">{fmtWeekDMY(w.week)}</span>
+                  </div>
+                );
+              })}
+            </div>
+            <div className="flex flex-wrap gap-x-3 gap-y-1 mt-3 pt-3 border-t border-[var(--border)]">
+              {d.weeklyBySource.categories.map((c) => (
+                <span key={c} className="flex items-center gap-1.5 text-[.7rem] text-[var(--text-2)]">
+                  <span className="w-2.5 h-2.5 rounded-sm shrink-0" style={{ background: SOURCE_COLOR[c] ?? "#9B968A" }} />
+                  {CAT_TH[c] ?? c}
+                </span>
+              ))}
+            </div>
+          </>
         )}
       </Card>
 

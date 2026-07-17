@@ -5,7 +5,7 @@
 
 import { useEffect, useState, useCallback } from "react";
 import { Loader2, TrendingUp, AlertTriangle } from "lucide-react";
-import { Card, inputCls } from "@/components/ui";
+import { Card, inputCls, InfoTip } from "@/components/ui";
 import { useMe } from "@/components/Chrome";
 
 type Data = {
@@ -139,11 +139,27 @@ export default function RunRatePage() {
   const hasTarget = m.target !== null;
   const done = m.neededThisMonth === 0;
 
+  // Lead ที่ต้องใช้ — normally derived from the 90-day closing rate, but that
+  // rate is 0 whenever nobody has closed a deal in that window yet (new
+  // brand/branch, or just a quiet quarter). Falling back to "—" there hid an
+  // answer that already exists: เป้า Lead (the booking target × multiplier
+  // from /settings/conversion-rates) doesn't depend on the closing rate at
+  // all. Flagged via usingFallback so the UI can label it as a different
+  // kind of number, not silently swap the meaning (user req 2026-07-15).
+  const usingFallback = d.conversion.rate === 0 && d.leadTarget.total !== null;
+  const requiredLeads = m.neededThisMonth === null ? null
+    : d.conversion.rate > 0 ? Math.ceil(m.neededThisMonth / d.conversion.rate)
+    : usingFallback ? d.leadTarget.total : null;
+  const gapMoreLeads = requiredLeads !== null ? Math.max(0, requiredLeads - d.leads.expectedRest) : null;
+
   return (
     <div className="space-y-5">
       <div>
-        <h1 className="text-[1.7rem]">Run Rate เป้าเดือน {TH_M[m.name - 1]}</h1>
-        <p className="text-[var(--text-2)] text-[.95rem]">นับจำนวนจอง (จองได้ = จบเคส) · เกินเป้าเดือนนี้ยกไปเดือนหน้า · เหลืออีก {m.daysLeft} วัน</p>
+        <h1 className="text-[1.7rem] flex items-center gap-1.5">
+          Run Rate เป้าเดือน {TH_M[m.name - 1]}
+          <InfoTip text={'"Run Rate" คือการคาดคะเนผลทั้งเดือนจากจังหวะที่ทำได้อยู่ตอนนี้ — หน้านี้นับเฉพาะจำนวน "จองได้" (จองแล้วถือว่าจบเคส ไม่นับเงินหรือมูลค่า) เกินเป้าเดือนนี้ ส่วนเกินจะยกไปทบเป้าเดือนหน้าให้อัตโนมัติ'} />
+        </h1>
+        <p className="text-[var(--text-2)] text-[.95rem]">เหลืออีก {m.daysLeft} วันในเดือนนี้ · ตัวเลขทั้งหมดด้านล่างอัปเดตตามจริงทุกครั้งที่เข้าหน้านี้</p>
       </div>
 
       {myBrands.length > 1 && (
@@ -162,13 +178,29 @@ export default function RunRatePage() {
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         {[
-          { l: `จองแล้วเดือนนี้${hasTarget ? ` / เป้า ${m.target}` : ""}`, v: `${m.actualBookings}${hasTarget ? ` / ${m.target}` : ""}`, cls: done ? "text-[var(--green)]" : "" },
-          { l: "ยอดยกมา (สะสมทั้งปี)", v: m.carryIn > 0 ? `+${m.carryIn}` : String(m.carryIn), cls: m.carryIn >= 0 ? "text-[var(--green)]" : "text-[var(--red)]" },
-          { l: "ต้องจองอีกในเดือนนี้", v: m.neededThisMonth ?? "—", cls: done ? "text-[var(--green)]" : "text-[var(--accent-text)]" },
-          { l: `Conversion (${d.conversion.cohortConverted}/${d.conversion.cohortLeads})`, v: pct(d.conversion.rate), cls: "" },
+          {
+            l: hasTarget ? `จองแล้ว / เป้าเดือนนี้` : "จองแล้วเดือนนี้",
+            v: `${m.actualBookings}${hasTarget ? ` / ${m.target}` : ""}`, cls: done ? "text-[var(--green)]" : "",
+            tip: "จำนวนเคสที่ลูกค้าตกลงจอง นับตั้งแต่วันที่ 1 ของเดือนนี้ เทียบกับเป้าที่ตั้งไว้",
+          },
+          {
+            l: "ยอดยกมา (สะสมทั้งปี)",
+            v: m.carryIn > 0 ? `+${m.carryIn}` : String(m.carryIn), cls: m.carryIn >= 0 ? "text-[var(--green)]" : "text-[var(--red)]",
+            tip: "ผลต่างสะสมระหว่างจองจริงกับเป้า นับรวมทุกเดือนที่ผ่านมาปีนี้ — เดือนไหนทำเกินเป้า ส่วนเกินยกมาบวกที่นี่ (ทำน้อยกว่าเป้าก็ลบสะสมเหมือนกัน)",
+          },
+          {
+            l: "ต้องจองอีกในเดือนนี้",
+            v: m.neededThisMonth ?? "—", cls: done ? "text-[var(--green)]" : "text-[var(--accent-text)]",
+            tip: "เป้าเดือนนี้ ลบด้วยยอดยกมาและยอดที่จองแล้ว — คือจำนวนที่ยังขาดจริงๆ ก่อนจะถึงเป้า",
+          },
+          {
+            l: `อัตราปิดการขาย (${d.conversion.cohortConverted}/${d.conversion.cohortLeads})`,
+            v: pct(d.conversion.rate), cls: "",
+            tip: `คำนวณจาก Lead ที่เข้ามาในช่วง 90 วันล่าสุด (${d.conversion.cohortLeads} ราย) เทียบกับจำนวนที่ปิดจองได้ในช่วงเวลาเดียวกัน (${d.conversion.cohortConverted} ราย) — เป็นค่าเฉลี่ยแบบ rolling ไม่ใช่แค่เดือนนี้ ถ้ายังไม่มีใครปิดได้เลยใน 90 วัน ค่านี้จะเป็น 0%`,
+          },
         ].map((c) => (
           <div key={c.l} className="bg-white border border-[var(--border)] rounded-xl px-4 py-3 shadow-[var(--shadow)]">
-            <div className="text-[.7rem] text-[var(--text-2)]">{c.l}</div>
+            <div className="text-[.7rem] text-[var(--text-2)] flex items-center gap-1">{c.l}<InfoTip text={c.tip} /></div>
             <div className={`text-xl font-semibold num mt-0.5 ${c.cls}`}>{c.v}</div>
           </div>
         ))}
@@ -189,17 +221,26 @@ export default function RunRatePage() {
               {d.forecast && (
                 <div className="mt-3 grid md:grid-cols-3 gap-2 text-[.82rem]">
                   <div className="bg-white rounded-xl p-3">
-                    <div className="text-[.7rem] text-[var(--text-3)]">Lead ที่ต้องใช้ (ที่ CR {pct(d.conversion.rate)})</div>
-                    <b className="num text-lg">{d.conversion.rate > 0 ? Math.ceil(m.neededThisMonth / d.conversion.rate) : "—"} ราย</b>
+                    <div className="text-[.7rem] text-[var(--text-3)] flex items-center gap-1">
+                      Lead ที่ต้องใช้{!usingFallback && ` (ที่อัตราปิดการขาย ${pct(d.conversion.rate)})`}
+                      <InfoTip text={usingFallback
+                        ? "ยังไม่มีเคสไหนปิดการขายได้เลยใน 90 วันล่าสุด เลยคำนวณจากอัตราปิดการขายจริงไม่ได้ — ใช้เป้า Lead ทั้งเดือน (จากตัวคูณที่ตั้งไว้) แทนชั่วคราว"
+                        : `เป้าที่ยังขาด (${m.neededThisMonth} เคส) ÷ อัตราปิดการขาย ${pct(d.conversion.rate)}`} />
+                    </div>
+                    <b className="num text-lg">{requiredLeads ?? "—"} ราย</b>
+                    {usingFallback && <div className="text-[.66rem] text-[var(--amber)] mt-0.5">≈ เป้า Lead ทั้งเดือน (ยังไม่มีข้อมูลอัตราปิดการขายจริง)</div>}
                   </div>
                   <div className="bg-white rounded-xl p-3">
-                    <div className="text-[.7rem] text-[var(--text-3)]">Lead ที่คาดว่าจะเข้าเองช่วงที่เหลือ</div>
+                    <div className="text-[.7rem] text-[var(--text-3)] flex items-center gap-1">
+                      Lead ที่คาดว่าจะเข้าเองช่วงที่เหลือ
+                      <InfoTip text="คาดจากจังหวะ Lead เข้าเฉลี่ยต่อวันของเดือนนี้ คูณด้วยจำนวนวันที่เหลือ" />
+                    </div>
                     <b className="num text-lg">{d.leads.expectedRest} ราย</b>
                   </div>
                   <div className="bg-white rounded-xl p-3">
                     <div className="text-[.7rem] text-[var(--text-3)]">🔍 ต้องหา Lead เพิ่มอีก</div>
-                    <b className={`num text-lg ${d.conversion.rate > 0 && Math.max(0, Math.ceil(m.neededThisMonth / d.conversion.rate) - d.leads.expectedRest) > 0 ? "text-[var(--red)]" : "text-[var(--green)]"}`}>
-                      {d.conversion.rate > 0 ? Math.max(0, Math.ceil(m.neededThisMonth / d.conversion.rate) - d.leads.expectedRest) : "—"} ราย
+                    <b className={`num text-lg ${gapMoreLeads !== null && gapMoreLeads > 0 ? "text-[var(--red)]" : "text-[var(--green)]"}`}>
+                      {gapMoreLeads ?? "—"} ราย
                     </b>
                   </div>
                 </div>
@@ -231,7 +272,7 @@ export default function RunRatePage() {
         </Card>
       )}
 
-      <Card title="Weighted Pipeline (พยากรณ์จาก Lead ที่เปิดอยู่)" desc="Lead ที่ active ตอนนี้ × โอกาสปิดของแต่ละระดับ (ตั้งค่าได้ที่ /settings/conversion-rates)">
+      <Card title="พยากรณ์ถ่วงน้ำหนัก (Weighted Pipeline)" desc="อีกมุมหนึ่ง แยกจากอัตราปิดการขายด้านบน — เอา Lead ที่ยังเปิดอยู่ตอนนี้ (ไม่ใช่ Lead ใหม่ที่จะเข้ามา) คูณโอกาสปิดของแต่ละระดับความสนใจ (ตั้งค่าโอกาส % ได้ที่ /settings/conversion-rates)">
         <div className="grid grid-cols-3 gap-3">
           {([
             { key: "hot", label: "HOT", cls: "text-[var(--red)]" },

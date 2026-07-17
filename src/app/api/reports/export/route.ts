@@ -1,13 +1,24 @@
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { requireRole } from "@/lib/authz";
+import { requireRole, managerAllowedBranchIds } from "@/lib/authz";
 
 // CSV export of filtered leads (same filters as /api/reports) — for working
 // the data elsewhere (Excel, ส่งต่อฝ่ายอื่น). UTF-8 BOM so Thai opens
 // correctly in Excel.
+//
+// Branch scoping (bug found 2026-07-15, same as /api/reports — this export
+// leaks customer name/phone, so the gap mattered more here than most):
+// combined via an `AND` array so a client-requested filter can only narrow
+// within the manager's own scope, never escape it.
 export async function GET(request: NextRequest) {
   const rq = await requireRole(["manager", "gm", "admin"]);
   if (!rq.ok) return rq.response;
+
+  let branchScope: number[] | null = null;
+  if (rq.role === "manager") {
+    const allowed = await managerAllowedBranchIds(rq.funUserId!);
+    if (allowed.length) branchScope = allowed;
+  }
 
   const p = request.nextUrl.searchParams;
   const from = p.get("from") ? new Date(`${p.get("from")}T00:00:00`) : new Date(Date.now() - 90 * 864e5);
@@ -15,10 +26,13 @@ export async function GET(request: NextRequest) {
 
   const leads = await prisma.lead.findMany({
     where: {
-      createdAt: { gte: from, lte: to },
-      ...(p.get("brandId") ? { brandId: Number(p.get("brandId")) } : {}),
-      ...(p.get("branchId") ? { branchId: Number(p.get("branchId")) } : {}),
-      ...(p.get("ownerId") ? { ownerUserId: Number(p.get("ownerId")) } : {}),
+      AND: [
+        { createdAt: { gte: from, lte: to } },
+        branchScope ? { branchId: { in: branchScope } } : {},
+        p.get("brandId") ? { brandId: Number(p.get("brandId")) } : {},
+        p.get("branchId") ? { branchId: Number(p.get("branchId")) } : {},
+        p.get("ownerId") ? { ownerUserId: Number(p.get("ownerId")) } : {},
+      ],
     },
     include: { person: { include: { identifiers: true } }, channel: true, brand: true, branch: true },
     orderBy: { leadId: "asc" },

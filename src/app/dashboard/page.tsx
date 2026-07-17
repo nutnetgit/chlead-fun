@@ -30,6 +30,15 @@ type Dash = {
     userId: number; name: string; leadsHeld: number; overdue: number;
     avgFirstResponseMin: number | null; activitiesPerDay: number; bookingsMonth: number; conversion: number | null;
   }[];
+  channelPerformance: {
+    best: { category: string; leads: number; booked: number; rate: number } | null;
+    worst: { category: string; leads: number; booked: number; rate: number } | null;
+    sampleDays: number; minSample: number;
+  };
+};
+const CAT_TH: Record<string, string> = {
+  walkin: "Walk-in", phone: "โทรศัพท์", online_owned: "Online เพจ/OA", online_paid: "Online Ads",
+  oem: "OEM", event: "Event/บูธ", referral: "แนะนำ", service: "ลูกค้าเก่า", fleet: "Fleet", unknown: "ไม่ระบุ",
 };
 type UserRow = { userId: number; displayName: string; role: string; branchId: number | null; branchIds: number[] };
 type BrandRow = { brandId: number; brandName: string };
@@ -137,6 +146,35 @@ export default function DashboardPage() {
               {b.brandName}
             </button>
           ))}
+        </div>
+      )}
+
+      {/* Channel performance (user req 2026-07-15: "วัดประสิทธิภาพของ lead
+          ตามช่องทางต่างๆ") — best/worst converting channel over a 90-day
+          window, only shown once a channel has enough volume (minSample) to
+          not be noise; full breakdown lives on /reports. */}
+      {d && (d.channelPerformance.best || d.channelPerformance.worst) && (
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+          {d.channelPerformance.best && (
+            <div className="bg-[var(--green-soft)] border border-[var(--green)] rounded-xl px-4 py-3">
+              <div className="text-[.7rem] text-[var(--text-2)]">ช่องทางที่ conversion ดีที่สุด (90 วัน)</div>
+              <div className="flex items-center justify-between mt-0.5">
+                <span className="font-medium text-[.9rem]">{CAT_TH[d.channelPerformance.best.category] ?? d.channelPerformance.best.category}</span>
+                <span className="text-[var(--green)] font-semibold num">{Math.round(d.channelPerformance.best.rate * 100)}%</span>
+              </div>
+              <div className="text-[.7rem] text-[var(--text-2)] num">{d.channelPerformance.best.leads} lead · จอง {d.channelPerformance.best.booked}</div>
+            </div>
+          )}
+          {d.channelPerformance.worst && (
+            <div className="bg-[var(--red-soft)] border border-[var(--red)] rounded-xl px-4 py-3">
+              <div className="text-[.7rem] text-[var(--text-2)]">ช่องทางที่ conversion ต่ำสุด (90 วัน)</div>
+              <div className="flex items-center justify-between mt-0.5">
+                <span className="font-medium text-[.9rem]">{CAT_TH[d.channelPerformance.worst.category] ?? d.channelPerformance.worst.category}</span>
+                <span className="text-[var(--red)] font-semibold num">{Math.round(d.channelPerformance.worst.rate * 100)}%</span>
+              </div>
+              <div className="text-[.7rem] text-[var(--text-2)] num">{d.channelPerformance.worst.leads} lead · จอง {d.channelPerformance.worst.booked}</div>
+            </div>
+          )}
         </div>
       )}
 

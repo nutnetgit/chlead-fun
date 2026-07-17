@@ -62,7 +62,7 @@ export async function GET(req: Request) {
   const [
     active, dueToday, byTemp, byStage, openBreaches, poolWaitingRows, conflicts, recentEvents,
     pendingEscalations, staleHotLeads, poolAllWaiting,
-    salespeople, activeLeads, activities7d, bookingsMonth, cohort90,
+    salespeople, activeLeads, activities7d, bookingsMonth, cohort90, channelCohort,
   ] = await Promise.all([
     prisma.lead.count({ where: { status: "active", ...leadBranchWhere } }),
     prisma.lead.count({ where: { status: "active", nextActionAt: { lte: endOfToday }, ...leadBranchWhere } }),
@@ -112,6 +112,12 @@ export async function GET(req: Request) {
     prisma.lead.findMany({
       where: { createdAt: { gte: d90 }, ownerUserId: { not: null }, ...leadBranchWhere },
       select: { ownerUserId: true, stage: true, createdAt: true, firstResponseAt: true },
+    }),
+    // ── Channel performance (user req 2026-07-15) — 90-day window, same as
+    // the scorecard cohort, for enough volume to not be noise.
+    prisma.lead.findMany({
+      where: { createdAt: { gte: d90 }, ...leadBranchWhere },
+      select: { stage: true, channel: { select: { category: true } } },
     }),
   ]);
 
@@ -193,8 +199,34 @@ export async function GET(req: Request) {
     l.person.nickname || l.person.firstName || "ไม่ระบุชื่อ";
   const daysAgo = (d: Date | null) => d ? Math.floor((now.getTime() - d.getTime()) / DAY) : null;
 
+  // ── Channel performance best/worst (user req 2026-07-15) ────────────────
+  // Minimum sample size so a channel with 1-2 leads can't show a misleading
+  // 0%/100% rate — needs at least this many leads in the 90-day window to
+  // be eligible at all.
+  const CONVERTED_STAGES = new Set(["booking", "contract", "delivered", "won"]);
+  const MIN_CHANNEL_SAMPLE = 5;
+  const channelStats = new Map<string, { leads: number; booked: number }>();
+  for (const l of channelCohort) {
+    const cat = l.channel.category;
+    const cur = channelStats.get(cat) ?? { leads: 0, booked: 0 };
+    cur.leads++;
+    if (CONVERTED_STAGES.has(l.stage)) cur.booked++;
+    channelStats.set(cat, cur);
+  }
+  const eligibleChannels = [...channelStats.entries()]
+    .filter(([, v]) => v.leads >= MIN_CHANNEL_SAMPLE)
+    .map(([category, v]) => ({ category, leads: v.leads, booked: v.booked, rate: v.booked / v.leads }))
+    .sort((a, b) => b.rate - a.rate);
+  const channelPerformance = {
+    best: eligibleChannels[0] ?? null,
+    worst: eligibleChannels.length > 1 ? eligibleChannels[eligibleChannels.length - 1] : null,
+    sampleDays: 90,
+    minSample: MIN_CHANNEL_SAMPLE,
+  };
+
   return NextResponse.json({
     brandId: brandFilter,
+    channelPerformance,
     active, dueToday, openBreaches, poolWaiting: poolWaiting.length, conflicts,
     byTemperature: Object.fromEntries(byTemp.map((t) => [t.temperature ?? "unscored", t._count])),
     byStage: Object.fromEntries(byStage.map((s) => [s.stage, s._count])),
