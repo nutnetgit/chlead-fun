@@ -1,28 +1,46 @@
 "use client";
 
-// Channels screen (handoff §5.1): table of fun_channel_config —
-// FB page → brand → branch → LINE group → Google Sheet.
-// Adding a brand/branch = adding a row here; no code changes (§8 rollout plan).
+// Channels screen (handoff §5.1): table of fun_channel_config — FB page →
+// brand/branch → LINE group. Adding a brand/branch = adding a row here; no
+// code changes (§8 rollout plan).
+//
+// Rebuilt 2026-07-15 (user req: "หน้านี้ใช้ไม่ได้แล้ว") — the brand dropdown
+// used to be a hardcoded lowercase slug list in src/lib/types.ts that never
+// got new brands added later (GAC, Lepas missing — there was no way to map
+// a channel to them at all). Brand/branch are now live selects sourced from
+// /api/branches, and the value stored is the REAL brand/branch identity
+// (brandName / branchCode) — ingestLead() in src/lib/leads.ts matches
+// fun_channel_config.brand against Brand.brandName and auto-CREATES a new
+// Brand row if nothing matches, so a typo'd or stale string here used to be
+// able to silently spawn a duplicate brand. Sourcing the value directly from
+// the live Brand/Branch tables removes that risk. Google Sheet field
+// dropped entirely — grepped the whole app, gsheetId was never read
+// anywhere outside this page/its API routes, pure dead storage.
 
 import { useEffect, useState } from "react";
 import { Plus, Pencil, Trash2, Loader2, RefreshCw } from "lucide-react";
-import { BRANDS, BRAND_LABELS, type ChannelRow } from "@/lib/types";
 import { Card, Toggle, inputCls } from "@/components/ui";
 import { SettingsShell } from "@/components/SettingsShell";
 
-type Draft = {
+type ChannelRow = {
+  configId: number;
   fbPageId: string;
-  fbPageName: string;
+  fbPageName: string | null;
   brand: string;
   branchCode: string;
   lineGroupId: string;
-  gsheetId: string;
+  active: boolean;
 };
+type BrandRow = { brandId: number; brandName: string };
+type BranchRow = { branchId: number; branchName: string; branchCode: string | null; brandId: number | null };
 
-const EMPTY: Draft = { fbPageId: "", fbPageName: "", brand: "mazda", branchCode: "", lineGroupId: "", gsheetId: "" };
+type Draft = { fbPageId: string; fbPageName: string; brandId: string; branchId: string; lineGroupId: string };
+const EMPTY: Draft = { fbPageId: "", fbPageName: "", brandId: "", branchId: "", lineGroupId: "" };
 
 export default function ChannelsPage() {
   const [rows, setRows] = useState<ChannelRow[] | null>(null);
+  const [brands, setBrands] = useState<BrandRow[]>([]);
+  const [branches, setBranches] = useState<BranchRow[]>([]);
   const [draft, setDraft] = useState<Draft>(EMPTY);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [saving, setSaving] = useState(false);
@@ -31,35 +49,52 @@ export default function ChannelsPage() {
   const [lastGroup, setLastGroup] = useState<{ id: string; at: string } | null>(null);
 
   const load = async () => {
-    const [chRes, stRes] = await Promise.all([fetch("/api/channels"), fetch("/api/settings")]);
+    const [chRes, brRes, stRes] = await Promise.all([fetch("/api/channels"), fetch("/api/branches?all=1"), fetch("/api/settings")]);
     setRows(await chRes.json());
+    const br = await brRes.json().catch(() => ({}));
+    setBrands(br.brands ?? []); setBranches(br.branches ?? []);
     const st = await stRes.json().catch(() => ({}));
     setLastGroup(st.line_last_group_id ?? null);
   };
   useEffect(() => { load(); }, []);
 
+  const brandName = (name: string) => brands.find((b) => b.brandName.toLowerCase() === name.toLowerCase())?.brandName ?? name;
+  const branchLabel = (code: string) => branches.find((b) => (b.branchCode ?? b.branchName) === code)?.branchName ?? code;
+  const branchOptions = draft.brandId ? branches.filter((b) => b.brandId === Number(draft.brandId)) : [];
+
   const startEdit = (r: ChannelRow) => {
     setEditingId(r.configId);
+    const brand = brands.find((b) => b.brandName.toLowerCase() === r.brand.toLowerCase());
+    const branch = branches.find((b) => (b.branchCode ?? b.branchName) === r.branchCode);
     setDraft({
-      fbPageId: r.fbPageId,
-      fbPageName: r.fbPageName ?? "",
-      brand: r.brand,
-      branchCode: r.branchCode,
+      fbPageId: r.fbPageId, fbPageName: r.fbPageName ?? "",
+      brandId: brand ? String(brand.brandId) : "", branchId: branch ? String(branch.branchId) : "",
       lineGroupId: r.lineGroupId,
-      gsheetId: r.gsheetId ?? "",
     });
+    setError(null);
   };
 
   const cancel = () => { setEditingId(null); setDraft(EMPTY); setError(null); };
 
   async function save() {
+    const brand = brands.find((b) => b.brandId === Number(draft.brandId));
+    const branch = branches.find((b) => b.branchId === Number(draft.branchId));
+    if (!draft.fbPageId.trim() || !brand || !branch || !draft.lineGroupId.trim()) {
+      setError("กรอก FB Page ID, แบรนด์, สาขา, และ LINE Group ID ให้ครบ");
+      return;
+    }
     setSaving(true);
     setError(null);
+    const body = {
+      fbPageId: draft.fbPageId, fbPageName: draft.fbPageName,
+      brand: brand.brandName, branchCode: branch.branchCode ?? branch.branchName,
+      lineGroupId: draft.lineGroupId,
+    };
     const url = editingId === null ? "/api/channels" : `/api/channels/${editingId}`;
     const res = await fetch(url, {
       method: editingId === null ? "POST" : "PUT",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(draft),
+      body: JSON.stringify(body),
     });
     if (res.ok) {
       cancel();
@@ -90,8 +125,8 @@ export default function ChannelsPage() {
     <SettingsShell>
     <div className="space-y-4">
       <Card
-        title="Channels — FB Page → LINE Group → Google Sheet"
-        desc="กำหนดว่า Lead จากเพจไหน ส่งเข้ากลุ่ม LINE ไหน และบันทึกลง Sheet ไหน. เพิ่มแบรนด์/สาขาใหม่ = เพิ่มแถวที่นี่ ไม่ต้องแก้ workflow."
+        title="Channels — FB Page → LINE Group"
+        desc="กำหนดว่า Lead จากเพจไหน ส่งเข้ากลุ่ม LINE ไหน. เพิ่มแบรนด์/สาขาใหม่ที่ /settings/branches ก่อน แล้วค่อยมาผูก channel ที่นี่"
       >
         {rows === null ? (
           <p className="text-sm text-[var(--muted-foreground)]">Loading…</p>
@@ -106,7 +141,6 @@ export default function ChannelsPage() {
                   <th className="py-2 pr-3">แบรนด์</th>
                   <th className="py-2 pr-3">สาขา</th>
                   <th className="py-2 pr-3">LINE Group</th>
-                  <th className="py-2 pr-3">Sheet</th>
                   <th className="py-2 pr-3">เปิดใช้</th>
                   <th className="py-2" />
                 </tr>
@@ -118,10 +152,9 @@ export default function ChannelsPage() {
                       <div className="font-medium">{r.fbPageName || "—"}</div>
                       <div className="font-mono text-[11px] text-[var(--muted-foreground)]">{r.fbPageId}</div>
                     </td>
-                    <td className="py-2 pr-3 capitalize">{BRAND_LABELS[r.brand as keyof typeof BRAND_LABELS] ?? r.brand}</td>
-                    <td className="py-2 pr-3">{r.branchCode}</td>
+                    <td className="py-2 pr-3">{brandName(r.brand)}</td>
+                    <td className="py-2 pr-3">{branchLabel(r.branchCode)}</td>
                     <td className="py-2 pr-3 font-mono text-[11px]">{r.lineGroupId.slice(0, 12)}…</td>
-                    <td className="py-2 pr-3 font-mono text-[11px]">{r.gsheetId ? `${r.gsheetId.slice(0, 10)}…` : "—"}</td>
                     <td className="py-2 pr-3"><Toggle on={!!r.active} onClick={() => toggleActive(r)} /></td>
                     <td className="py-2 text-right whitespace-nowrap">
                       <button onClick={() => startEdit(r)} className="p-1.5 rounded hover:bg-[var(--accent)]" title="แก้ไข"><Pencil size={14} /></button>
@@ -149,24 +182,22 @@ export default function ChannelsPage() {
           </label>
           <label className="block">
             <span className="text-[11px] font-medium text-[var(--muted-foreground)] mb-1 block">แบรนด์ *</span>
-            <select value={draft.brand} onChange={e => setDraft({ ...draft, brand: e.target.value })} className={inputCls}>
-              {BRANDS.map(b => <option key={b} value={b}>{BRAND_LABELS[b]}</option>)}
+            <select value={draft.brandId} onChange={e => setDraft({ ...draft, brandId: e.target.value, branchId: "" })} className={inputCls}>
+              <option value="">— เลือกแบรนด์ —</option>
+              {brands.map(b => <option key={b.brandId} value={b.brandId}>{b.brandName}</option>)}
             </select>
           </label>
           <label className="block">
-            <span className="text-[11px] font-medium text-[var(--muted-foreground)] mb-1 block">รหัสสาขา *</span>
-            <input value={draft.branchCode} onChange={e => setDraft({ ...draft, branchCode: e.target.value })}
-              placeholder="เช่น KK01" className={inputCls + " font-mono text-xs"} />
+            <span className="text-[11px] font-medium text-[var(--muted-foreground)] mb-1 block">สาขา *</span>
+            <select value={draft.branchId} onChange={e => setDraft({ ...draft, branchId: e.target.value })} className={inputCls} disabled={!draft.brandId}>
+              <option value="">{draft.brandId ? "— เลือกสาขา —" : "เลือกแบรนด์ก่อน"}</option>
+              {branchOptions.map(b => <option key={b.branchId} value={b.branchId}>{b.branchName}</option>)}
+            </select>
           </label>
-          <label className="block">
+          <label className="block md:col-span-2">
             <span className="text-[11px] font-medium text-[var(--muted-foreground)] mb-1 block">LINE Group ID (กลุ่มเซลล์) *</span>
             <input value={draft.lineGroupId} onChange={e => setDraft({ ...draft, lineGroupId: e.target.value })}
               placeholder="Cxxxxxxxx…" className={inputCls + " font-mono text-xs"} />
-          </label>
-          <label className="block">
-            <span className="text-[11px] font-medium text-[var(--muted-foreground)] mb-1 block">Google Sheet ID</span>
-            <input value={draft.gsheetId} onChange={e => setDraft({ ...draft, gsheetId: e.target.value })}
-              placeholder="จาก URL ของ spreadsheet (เว้นว่างได้)" className={inputCls + " font-mono text-xs"} />
           </label>
         </div>
 

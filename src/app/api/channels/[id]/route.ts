@@ -21,7 +21,6 @@ export async function PUT(request: NextRequest, { params }: Ctx) {
   if (typeof b.brand === "string") data.brand = b.brand.trim().toLowerCase();
   if (typeof b.branchCode === "string") data.branchCode = b.branchCode.trim();
   if (typeof b.lineGroupId === "string") data.lineGroupId = b.lineGroupId.trim();
-  if (typeof b.gsheetId === "string") data.gsheetId = b.gsheetId.trim() || null;
   if (b.active === 0 || b.active === 1) data.active = b.active;
 
   try {

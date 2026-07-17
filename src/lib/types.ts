@@ -1,6 +1,15 @@
-// Brands are fixed company-wide (6 pages today, more later — adding a brand is
-// just a new row in fun_channel_config, no code change).
-export const BRANDS = ["mazda", "ford", "mitsubishi", "gwm", "deepal", "kia"] as const;
+// Brands are NOT fixed — new ones get added freely via /settings/branches
+// (a row in the live Brand table, e.g. GAC/Lepas added after this list was
+// first written). This BRANDS/BRAND_LABELS pair is only a display-label
+// fallback for flex.ts's Flex card builders now (BRAND_LABELS[x] ?? x) —
+// the Channels page used to treat this as the authoritative brand list for
+// its dropdown, which is exactly why it silently couldn't map GAC/Lepas to
+// any channel; rebuilt 2026-07-15 to source brands live from /api/branches
+// instead. Keep this list in sync manually when a brand's display casing
+// needs to differ from Prisma's stored brandName (rare) — the ?? fallback
+// means a brand missing here still displays fine, just using its raw
+// brandName instead of a curated label.
+export const BRANDS = ["mazda", "ford", "mitsubishi", "gwm", "deepal", "kia", "gac", "lepas"] as const;
 export type BrandKey = (typeof BRANDS)[number];
 
 export const BRAND_LABELS: Record<BrandKey, string> = {
@@ -10,18 +19,8 @@ export const BRAND_LABELS: Record<BrandKey, string> = {
   gwm: "GWM",
   deepal: "Deepal",
   kia: "Kia",
-};
-
-export type ChannelRow = {
-  configId: number;
-  fbPageId: string;
-  fbPageName: string | null;
-  brand: string;
-  branchCode: string;
-  lineGroupId: string;
-  gsheetId: string | null;
-  active: number | null;
-  updatedAt?: string | null;
+  gac: "GAC",
+  lepas: "Lepas",
 };
 
 // Health snapshots written by n8n into fun_settings (handoff §5.2):

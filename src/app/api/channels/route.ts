@@ -26,7 +26,6 @@ export async function POST(request: NextRequest) {
         brand: String(b.brand).trim().toLowerCase(),
         branchCode: String(b.branchCode).trim(),
         lineGroupId: String(b.lineGroupId).trim(),
-        gsheetId: b.gsheetId ? String(b.gsheetId).trim() : null,
         active: b.active === 0 ? 0 : 1,
       },
     });
