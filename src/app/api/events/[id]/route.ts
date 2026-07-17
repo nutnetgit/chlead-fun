@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireRole, managerAllowedBranchIds } from "@/lib/authz";
+import { sumBrandTargets } from "@/app/api/events/route";
 
 type Ctx = { params: Promise<{ id: string }> };
 
@@ -46,16 +47,25 @@ export async function PUT(request: NextRequest, { params }: Ctx) {
   if (typeof b.eventName === "string" && b.eventName.trim()) data.campaignName = b.eventName.trim();
   if (b.startDate) data.startDate = new Date(String(b.startDate));
   if (b.endDate) data.endDate = new Date(String(b.endDate));
-  if (typeof b.targetLeads === "number" || b.targetLeads === null) data.targetLeads = b.targetLeads;
   if (typeof b.linePromoMessage === "string" || b.linePromoMessage === null) data.linePromoMessage = typeof b.linePromoMessage === "string" ? (b.linePromoMessage.trim() || null) : null;
+
+  // targetLeads (user req 2026-07-17): derived from per-brand targets
+  // whenever a brands array is sent — see sumBrandTargets in the sibling
+  // route for why (multi-brand events used to attribute one combined
+  // number to every attending brand on Run Rate).
+  let brands: { brandId: number; targetLeads: number | null }[] | null = null;
+  if (Array.isArray(b.brands)) {
+    const summed = sumBrandTargets(b.brands as { brandId?: unknown; targetLeads?: unknown }[]);
+    brands = summed.valid;
+    data.targetLeads = summed.total;
+  }
 
   try {
     if (Object.keys(data).length) await prisma.campaign.update({ where: { campaignId }, data });
-    if (Array.isArray(b.brandIds)) {
-      const brandIds = b.brandIds.filter((x) => Number.isInteger(x)) as number[];
+    if (brands) {
       await prisma.$transaction([
         prisma.campaignBrand.deleteMany({ where: { campaignId } }),
-        ...(brandIds.length ? [prisma.campaignBrand.createMany({ data: brandIds.map((brandId) => ({ campaignId, brandId })) })] : []),
+        ...(brands.length ? [prisma.campaignBrand.createMany({ data: brands.map((br) => ({ campaignId, brandId: br.brandId, targetLeads: br.targetLeads })) })] : []),
       ]);
     }
     if (Array.isArray(b.targets)) {

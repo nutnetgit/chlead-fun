@@ -167,7 +167,7 @@ export async function GET(request: NextRequest) {
       ...(brandId !== null ? { brands: { some: { brandId } } } : {}),
       ...(branchScope ? { OR: [{ branchId: { in: branchScope } }, { branchId: null }] } : {}),
     },
-    include: { targets: true },
+    include: { targets: true, brands: true },
   });
   let eventLeadTargetRaw = 0;
   for (const c of campaigns) {
@@ -176,11 +176,19 @@ export async function GET(request: NextRequest) {
     const overlapStart = Math.max(c.startDate.getTime(), monthStart.getTime());
     const overlapEnd = Math.min(c.endDate.getTime(), monthEnd.getTime());
     const overlapDays = Math.max(0, Math.round((overlapEnd - overlapStart) / DAY) + 1);
-    // Per-sales scope uses that person's own event target; team scope uses
-    // the event's overall target (falling back to the sum of per-sales ones).
+    // Per-sales scope uses that person's own event target. Team scope, when
+    // viewing one specific brand, uses THAT brand's own share (sql/031) —
+    // fixed 2026-07-17: a multi-brand event used to attribute its FULL
+    // combined target to every attending brand here (a 3-brand event with
+    // targetLeads=90 showed 90 for each brand, not a real split). No brand
+    // filter at all (shouldn't normally happen — Run Rate always scopes to
+    // one brand — but kept as a defensive fallback) uses the event's overall
+    // total, itself now derived server-side as the sum of brand shares.
     const base = ownerId
       ? (c.targets.find((t) => t.userId === ownerId)?.targetLeads ?? 0)
-      : (c.targetLeads ?? c.targets.reduce((s, t) => s + t.targetLeads, 0));
+      : brandId !== null
+        ? (c.brands.find((cb) => cb.brandId === brandId)?.targetLeads ?? 0)
+        : (c.targetLeads ?? c.targets.reduce((s, t) => s + t.targetLeads, 0));
     eventLeadTargetRaw += base * (overlapDays / totalDays);
   }
   const eventLeadTarget = Math.round(eventLeadTargetRaw);

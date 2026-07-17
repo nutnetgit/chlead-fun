@@ -16,12 +16,18 @@ type EventRow = {
   eventId: number; eventName: string; startDate: string | null; endDate: string | null;
   targetLeads: number | null; totalLeads: number; linePromoMessage: string | null;
   branchId: number | null; branchName: string | null; canEdit: boolean;
-  brands: { brandId: number; brandName: string }[];
+  brands: { brandId: number; brandName: string; targetLeads: number | null }[];
   targets: { userId: number; displayName: string; targetLeads: number; actualLeads: number }[];
 };
 
-type Draft = { eventName: string; startDate: string; endDate: string; targetLeads: string; linePromoMessage: string; branchId: string; brandIds: number[]; targets: { userId: number; targetLeads: number }[] };
-const EMPTY: Draft = { eventName: "", startDate: "", endDate: "", targetLeads: "", linePromoMessage: "", branchId: "", brandIds: [], targets: [] };
+// เป้า Lead ต่อยี่ห้อ (user req 2026-07-17): a multi-brand event used to have
+// ONE combined target that Run Rate then attributed in FULL to every
+// attending brand — replaced with a per-brand entry here; the overall total
+// shown on the event card is derived server-side as their sum, not entered
+// separately (same "don't hand-enter an aggregate" rule as Run Rate's team
+// booking target).
+type Draft = { eventName: string; startDate: string; endDate: string; linePromoMessage: string; branchId: string; brands: { brandId: number; targetLeads: string }[]; targets: { userId: number; targetLeads: number }[] };
+const EMPTY: Draft = { eventName: "", startDate: "", endDate: "", linePromoMessage: "", branchId: "", brands: [], targets: [] };
 
 const d10 = (s: string | null) => (s ? s.slice(0, 10) : "");
 
@@ -59,9 +65,10 @@ export default function EventsPage() {
 
   // Only salespeople whose branch access covers at least one of the event's
   // selected brands can sensibly get a per-sales target for it.
+  const draftBrandIds = draft.brands.map((x) => x.brandId);
   const eligibleUsers = users.filter((u) =>
-    draft.brandIds.length === 0 ||
-    u.branchIds.some((bid) => { const brandId = branches.find((b) => b.branchId === bid)?.brandId; return brandId !== null && brandId !== undefined && draft.brandIds.includes(brandId); }));
+    draftBrandIds.length === 0 ||
+    u.branchIds.some((bid) => { const brandId = branches.find((b) => b.branchId === bid)?.brandId; return brandId !== null && brandId !== undefined && draftBrandIds.includes(brandId); }));
 
   // Scroll to the edit form on แก้ไข (user req 2026-07-14, same fix already
   // applied to /settings/users: the form lives below a long event list, so
@@ -72,10 +79,9 @@ export default function EventsPage() {
     setEditingId(e.eventId);
     setDraft({
       eventName: e.eventName, startDate: d10(e.startDate), endDate: d10(e.endDate),
-      targetLeads: e.targetLeads !== null ? String(e.targetLeads) : "",
       linePromoMessage: e.linePromoMessage ?? "",
       branchId: e.branchId !== null ? String(e.branchId) : "",
-      brandIds: e.brands.map((b) => b.brandId),
+      brands: e.brands.map((b) => ({ brandId: b.brandId, targetLeads: b.targetLeads !== null ? String(b.targetLeads) : "" })),
       targets: e.targets.map((t) => ({ userId: t.userId, targetLeads: t.targetLeads })),
     });
     setTimeout(() => editFormRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 50);
@@ -89,10 +95,10 @@ export default function EventsPage() {
     const eligibleIds = new Set(eligibleUsers.map((u) => u.userId));
     const body = {
       eventName: draft.eventName, startDate: draft.startDate, endDate: draft.endDate,
-      targetLeads: draft.targetLeads ? Number(draft.targetLeads) : null,
       linePromoMessage: draft.linePromoMessage.trim() || null,
       branchId: draft.branchId ? Number(draft.branchId) : null,
-      brandIds: draft.brandIds, targets: draft.targets.filter((t) => eligibleIds.has(t.userId)),
+      brands: draft.brands.map((b) => ({ brandId: b.brandId, targetLeads: b.targetLeads ? Number(b.targetLeads) : null })),
+      targets: draft.targets.filter((t) => eligibleIds.has(t.userId)),
     };
     const res = await fetch(editingId === null ? "/api/events" : `/api/events/${editingId}`, {
       method: editingId === null ? "POST" : "PUT",
@@ -110,7 +116,12 @@ export default function EventsPage() {
   }
 
   const toggleBrand = (id: number) =>
-    setDraft((d) => ({ ...d, brandIds: d.brandIds.includes(id) ? d.brandIds.filter((x) => x !== id) : [...d.brandIds, id] }));
+    setDraft((d) => ({
+      ...d,
+      brands: d.brands.some((x) => x.brandId === id) ? d.brands.filter((x) => x.brandId !== id) : [...d.brands, { brandId: id, targetLeads: "" }],
+    }));
+  const setBrandTarget = (brandId: number, v: string) =>
+    setDraft((d) => ({ ...d, brands: d.brands.map((x) => (x.brandId === brandId ? { ...x, targetLeads: v } : x)) }));
   const setTarget = (userId: number, v: string) =>
     setDraft((d) => {
       const others = d.targets.filter((t) => t.userId !== userId);
@@ -165,7 +176,11 @@ export default function EventsPage() {
             <span className={`px-2 py-0.5 rounded-full font-medium ${e.branchName ? "bg-[var(--accent-soft)] text-[var(--accent-text)]" : "bg-[var(--surface-2)] text-[var(--text-3)]"}`}>
               {e.branchName ?? "งานกลาง"}
             </span>
-            {e.brands.map((b) => <span key={b.brandId} className="bg-[var(--bg)] px-2 py-0.5 rounded-full">{b.brandName}</span>)}
+            {e.brands.map((b) => (
+              <span key={b.brandId} className="bg-[var(--bg)] px-2 py-0.5 rounded-full num">
+                {b.brandName}{b.targetLeads !== null ? ` (${b.targetLeads})` : ""}
+              </span>
+            ))}
           </div>
           <div className="flex items-center gap-3">
             <span className="text-[.78rem] text-[var(--text-2)]">เป้ารวม</span>
@@ -204,10 +219,6 @@ export default function EventsPage() {
             <input type="date" value={draft.endDate} onChange={(e) => setDraft({ ...draft, endDate: e.target.value })} className={inputCls} />
           </label>
           <label className="block">
-            <span className="text-[11px] font-medium text-[var(--text-2)] mb-1 block">เป้า Lead รวม</span>
-            <input type="number" value={draft.targetLeads} onChange={(e) => setDraft({ ...draft, targetLeads: e.target.value })} className={inputCls} placeholder="เช่น 80" />
-          </label>
-          <label className="block">
             <span className="text-[11px] font-medium text-[var(--text-2)] mb-1 block">สาขาเจ้าของ event {isManager ? "*" : ""}</span>
             <select value={draft.branchId} onChange={(e) => setDraft({ ...draft, branchId: e.target.value })} className={inputCls}>
               {!isManager && <option value="">— งานกลาง (admin/gm ดูแล) —</option>}
@@ -218,20 +229,34 @@ export default function EventsPage() {
         </div>
 
         <div>
-          <span className="text-[11px] font-medium text-[var(--text-2)] mb-2 block">ยี่ห้อที่ไปออก</span>
-          <div className="flex flex-wrap gap-2">
+          <span className="text-[11px] font-medium text-[var(--text-2)] mb-2 block">
+            ยี่ห้อที่ไปออก พร้อมเป้า Lead ต่อยี่ห้อ (เว้นว่าง = ไม่กำหนดเป้าของยี่ห้อนั้น) — งาน 1 ยี่ห้อกรอกช่องเดียวพอ งานหลายยี่ห้อแยกเป้าแต่ละยี่ห้อชัดเจน ไม่ปนกัน
+          </span>
+          <div className="space-y-2">
             {brands.map((b) => {
-              const on = draft.brandIds.includes(b.brandId);
+              const entry = draft.brands.find((x) => x.brandId === b.brandId);
+              const on = !!entry;
               return (
-                <button key={b.brandId} type="button" onClick={() => toggleBrand(b.brandId)}
-                  className={`text-[.76rem] px-3 py-1.5 rounded-full border transition ${
-                    on ? "bg-[var(--accent-soft)] border-[var(--primary)] text-[var(--accent-text)] font-medium"
-                       : "bg-white border-[var(--border-2)] text-[var(--text-2)]"}`}>
-                  {b.brandName}
-                </button>
+                <div key={b.brandId} className="flex items-center gap-2">
+                  <button type="button" onClick={() => toggleBrand(b.brandId)}
+                    className={`text-[.76rem] px-3 py-1.5 rounded-full border transition shrink-0 ${
+                      on ? "bg-[var(--accent-soft)] border-[var(--primary)] text-[var(--accent-text)] font-medium"
+                         : "bg-white border-[var(--border-2)] text-[var(--text-2)]"}`}>
+                    {b.brandName}
+                  </button>
+                  {on && (
+                    <input type="number" min={0} value={entry.targetLeads} onChange={(e) => setBrandTarget(b.brandId, e.target.value)}
+                      className="w-28 px-2 py-1 text-sm bg-white border border-[var(--border-2)] rounded-lg" placeholder="เป้า Lead" />
+                  )}
+                </div>
               );
             })}
           </div>
+          {draft.brands.length > 0 && (
+            <p className="text-[.76rem] text-[var(--text-2)] mt-2">
+              รวมเป้า Lead ทุกยี่ห้อ: <b className="num">{draft.brands.reduce((s, x) => s + (Number(x.targetLeads) || 0), 0)}</b> ราย (คำนวณจากผลรวมด้านบนอัตโนมัติ)
+            </p>
+          )}
         </div>
 
         <label className="block">
@@ -247,7 +272,7 @@ export default function EventsPage() {
             เป้ารายเซลส์ (เว้นว่าง = ไม่ร่วม event) — แสดงเฉพาะคนที่ขายยี่ห้อที่เลือกไว้ด้านบนได้ (กำหนดยี่ห้อที่ขายได้ที่หน้าผู้ใช้และสิทธิ์)
           </span>
           <div className="grid md:grid-cols-2 gap-x-6 gap-y-2">
-            {draft.brandIds.length === 0 && <p className="text-[.76rem] text-[var(--text-3)] md:col-span-2">เลือกยี่ห้อที่ไปออกก่อน เพื่อกรองรายชื่อเซลส์ที่ขายยี่ห้อนั้นได้</p>}
+            {draftBrandIds.length === 0 && <p className="text-[.76rem] text-[var(--text-3)] md:col-span-2">เลือกยี่ห้อที่ไปออกก่อน เพื่อกรองรายชื่อเซลส์ที่ขายยี่ห้อนั้นได้</p>}
             {eligibleUsers.map((u) => (
               <label key={u.userId} className="flex items-center gap-2 text-[.8rem]">
                 <span className="flex-1 truncate">{u.displayName}</span>

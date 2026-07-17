@@ -439,6 +439,9 @@ model Campaign {
   budget           Decimal?  @db.Decimal(12, 2)
   actualCost       Decimal?  @map("actual_cost") @db.Decimal(12, 2)
   utmCode          String?   @map("utm_code") @db.VarChar(100)
+  // Whole-event total — DERIVED server-side as the sum of CampaignBrand.
+  // targetLeads (sql/031) whenever brands are saved with per-brand targets,
+  // not entered independently (same convention as Run Rate's team target).
   targetLeads      Int?      @map("target_leads")
   // Manager-settable text pushed to a customer via LINE OA when they follow
   // through this event's QR (user req 2026-07-08).
@@ -454,6 +457,9 @@ model CampaignBrand {
   id         Int @id @default(autoincrement())
   campaignId Int @map("campaign_id")
   brandId    Int @map("brand_id")
+  // Per-brand lead target for multi-brand events (sql/031) — Campaign.
+  // targetLeads is now DERIVED as the sum of these, not entered separately.
+  targetLeads Int? @map("target_leads")
 
   campaign Campaign @relation(fields: [campaignId], references: [campaignId])
 

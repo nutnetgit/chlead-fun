@@ -58,7 +58,7 @@ export async function GET(request: NextRequest) {
       branchName: e.branchId !== null ? branchName.get(e.branchId) ?? "?" : null,
       canEdit,
       totalLeads,
-      brands: e.brands.map((b) => ({ brandId: b.brandId, brandName: brandName.get(b.brandId) ?? "?" })),
+      brands: e.brands.map((b) => ({ brandId: b.brandId, brandName: brandName.get(b.brandId) ?? "?", targetLeads: b.targetLeads })),
       targets: e.targets.map((t) => ({
         userId: t.userId,
         displayName: userName.get(t.userId) ?? "?",
@@ -69,8 +69,25 @@ export async function GET(request: NextRequest) {
   }));
 }
 
-// Create event. Body: { eventName, startDate, endDate, targetLeads?,
-// branchId?, brandIds: number[], targets: {userId, targetLeads}[] }
+// Create event. Body: { eventName, startDate, endDate, branchId?,
+// brands: {brandId, targetLeads?}[], targets: {userId, targetLeads}[] }
+//
+// targetLeads (user req 2026-07-17): no longer a client-supplied flat field —
+// a multi-brand event used to take ONE combined number and attribute the
+// FULL thing to every attending brand on Run Rate (a 3-brand event with
+// targetLeads=90 showed 90 as EACH brand's own event-lead target, not a
+// split). Each brand now gets its own optional target; the whole-event
+// total is derived here as their sum, same convention as Run Rate's team
+// booking target (derive the aggregate, don't hand-enter it separately).
+export function sumBrandTargets(brands: { brandId?: unknown; targetLeads?: unknown }[]): { valid: { brandId: number; targetLeads: number | null }[]; total: number | null } {
+  const valid = brands
+    .filter((x): x is { brandId: number; targetLeads?: unknown } => Number.isInteger(x.brandId))
+    .map((x) => ({ brandId: x.brandId, targetLeads: typeof x.targetLeads === "number" && x.targetLeads > 0 ? x.targetLeads : null }));
+  const any = valid.some((x) => x.targetLeads !== null);
+  const total = any ? valid.reduce((s, x) => s + (x.targetLeads ?? 0), 0) : null;
+  return { valid, total };
+}
+
 export async function POST(request: NextRequest) {
   const rq = await requireRole(["manager", "gm", "admin"]);
   if (!rq.ok) return rq.response;
@@ -95,6 +112,8 @@ export async function POST(request: NextRequest) {
     (await prisma.sourceChannel.findFirst({ where: { channelName: "Event / บูธ" } })) ??
     (await prisma.sourceChannel.create({ data: { channelName: "Event / บูธ", category: "event" } }));
 
+  const { valid: brands, total: derivedTargetLeads } = sumBrandTargets(Array.isArray(b.brands) ? b.brands as { brandId?: unknown; targetLeads?: unknown }[] : []);
+
   const ev = await prisma.campaign.create({
     data: {
       campaignName: name,
@@ -102,13 +121,12 @@ export async function POST(request: NextRequest) {
       branchId,
       startDate: new Date(String(b.startDate)),
       endDate: new Date(String(b.endDate)),
-      targetLeads: typeof b.targetLeads === "number" ? b.targetLeads : null,
+      targetLeads: derivedTargetLeads,
       linePromoMessage: typeof b.linePromoMessage === "string" ? b.linePromoMessage.trim() || null : null,
     },
   });
-  const brandIds = Array.isArray(b.brandIds) ? (b.brandIds.filter((x) => Number.isInteger(x)) as number[]) : [];
-  if (brandIds.length) {
-    await prisma.campaignBrand.createMany({ data: brandIds.map((brandId) => ({ campaignId: ev.campaignId, brandId })) });
+  if (brands.length) {
+    await prisma.campaignBrand.createMany({ data: brands.map((br) => ({ campaignId: ev.campaignId, brandId: br.brandId, targetLeads: br.targetLeads })) });
   }
   const targets = Array.isArray(b.targets) ? (b.targets as { userId?: number; targetLeads?: number }[]) : [];
   const targetRows = targets.filter((t) => Number.isInteger(t.userId)).map((t) => ({
