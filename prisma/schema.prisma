@@ -517,6 +517,9 @@ model Lead {
   firstResponseAt   DateTime?    @map("first_response_at")
   lastActivityAt    DateTime?    @map("last_activity_at")
   nextActionAt      DateTime?    @map("next_action_at")
+  // Chat-extract watermark (sql/030): created_at of the newest chat message
+  // the hourly chat-extract job has analyzed for this lead.
+  chatAnalyzedAt    DateTime?    @map("chat_analyzed_at")
   // Soft-archive (CATS candidate parity): non-null hides the lead from the
   // default working views, data kept forever for historical/compliance lookup.
   archivedAt        DateTime?    @map("archived_at")

@@ -17,7 +17,7 @@ import type { AutomationResponse } from "@/app/api/settings/automation/route";
 
 const JOBS: { key: "sla" | "score" | "nudge" | "digest"; title: string; desc: string; hourly?: boolean }[] = [
   { key: "sla", title: "SLA Engine (นัดหมาย/แจ้งเตือนค้าง)", desc: "ทำงานทุกชั่วโมง — ไม่มีเวลาให้ตั้ง มีแต่เปิด/ปิด", hourly: true },
-  { key: "score", title: "Aira ให้คะแนน Lead", desc: "ให้คะแนน AI รายวัน — ตั้งเวลาทำงานได้" },
+  { key: "score", title: "Aira ให้คะแนน Lead + วิเคราะห์แชท", desc: "ให้คะแนน Lead ใหม่รายวัน (ตั้งเวลาได้) · สวิตช์เดียวกันคุมการวิเคราะห์แชทรายชั่วโมง — อ่านบทสนทนา LINE แล้วอัปเดตคะแนน/ระดับความสนใจ + เติมข้อมูลที่ลูกค้าพูดถึง (รุ่น สี งบ ผ่อน/สด เทิร์น) เฉพาะช่องที่ยังว่าง ไม่ทับข้อมูลที่คนกรอก" },
   { key: "nudge", title: "Aira ร่างข้อความติดตามลูกค้า", desc: "ส่งร่างข้อความให้เซลส์ตอนเช้า — ตั้งเวลาทำงานได้" },
   { key: "digest", title: "Aira สรุปเช้า (ผจก.)", desc: "สรุปสถานะทีมส่ง LINE ผจก. ตอนเช้า — ตั้งเวลาทำงานได้" },
 ];

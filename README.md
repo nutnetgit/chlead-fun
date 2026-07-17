@@ -89,6 +89,12 @@ Triggers — see `n8n/FUN-WF*.json`):
   pushes copyable text + an action card to the lead's sales LINE group, logs
   `fun_nudge_log`
 - `POST /api/jobs/sla` — hourly SLA engine (see below)
+- `POST /api/jobs/chat-extract` — hourly chat analysis (2026-07-15): leads
+  with new inbound LINE chat get re-scored from the transcript (same ADR-011
+  conflict rules as nightly scoring) + blank structured fields auto-filled
+  from what the customer said (รุ่น/สี/งบ/ผ่อน-สด/เทิร์น/ระยะเวลาซื้อ) —
+  never overwrites human-entered values; watermark `fun_lead.chat_analyzed_at`
+  (sql/030). Rides the "score" toggle in /settings/automation.
 
 Settings UI: `/settings/users` (user + role + flexible multi-branch access —
 `/api/users` CRUD incl. branchIds replacement), `/settings/branches`

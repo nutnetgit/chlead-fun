@@ -20,13 +20,24 @@ import type { Temperature } from "@prisma/client";
  */
 const DAY = 24 * 60 * 60 * 1000;
 
-function scoreTier(score: number): Temperature {
+export function scoreTier(score: number): Temperature {
   if (score >= 70) return "hot";
   if (score >= 35) return "warm";
   return "cold";
 }
 
 const TIER_RANK: Record<Temperature, number> = { cold: 0, warm: 1, hot: 2 };
+
+// ADR-011 in one place — shared with the hourly chat-extract job
+// (src/lib/jobs/chatExtract.ts) so both scoring paths resolve temperature
+// vs ai_score conflicts with byte-identical rules.
+export function resolveTemperature(current: Temperature | null, score: number): { temperature: Temperature; conflict: boolean } {
+  const aiTier = scoreTier(score);
+  if (current === null) return { temperature: aiTier, conflict: false };
+  const distance = Math.abs(TIER_RANK[aiTier] - TIER_RANK[current]);
+  if (distance > 1) return { temperature: "warm", conflict: true };
+  return { temperature: current, conflict: false };
+}
 
 export async function runScoreJob() {
   const gate = await isAutomationJobActive("score");
@@ -78,23 +89,8 @@ export async function runScoreJob() {
     if (!lead) continue;
     const score = Math.max(0, Math.min(100, Math.round(Number(p.score))));
     if (!Number.isFinite(score)) continue;
-    const aiTier = scoreTier(score);
-
-    let temperature = lead.temperature;
-    let conflict = false;
-    if (lead.temperature === null) {
-      // No human setting yet — the AI's tier becomes the temperature outright.
-      temperature = aiTier;
-    } else {
-      const distance = Math.abs(TIER_RANK[aiTier] - TIER_RANK[lead.temperature]);
-      if (distance > 1) {
-        // Hot vs Cold disagreement — force Warm, flag it visibly (ADR-011).
-        temperature = "warm";
-        conflict = true;
-        conflicts++;
-      }
-      // distance <= 1 (e.g. hot vs warm): leave the human's setting alone.
-    }
+    const { temperature, conflict } = resolveTemperature(lead.temperature, score);
+    if (conflict) conflicts++;
 
     await prisma.lead.update({
       where: { leadId: lead.leadId },

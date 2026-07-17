@@ -44,6 +44,17 @@ export async function isAutomationJobActive(key: AutomationJobKey): Promise<{ ac
   return { active: true };
 }
 
+// Enabled-only variant, hour ignored. The hourly chat-extract job rides the
+// "score" toggle (user decision 2026-07-15: it IS Aira scoring, extended to
+// continuous chat re-analysis — one switch controls both) but must not be
+// limited to score's once-a-day configured hour.
+export async function isAutomationJobEnabled(key: AutomationJobKey): Promise<{ active: boolean; reason?: string }> {
+  const saved = await getSetting<Record<string, { enabled: boolean; hour?: number }>>("automation");
+  const cfg = { ...AUTOMATION_DEFAULTS[key], ...saved?.[key] };
+  if (!cfg.enabled) return { active: false, reason: "disabled in /settings/automation" };
+  return { active: true };
+}
+
 // ── LINE message quota (user req 2026-07-08) ────────────────────────────────
 // LINE's free tier only covers outbound messages (push/reply-to-customer);
 // inbound customer messages are free and uncounted. The auto-welcome push

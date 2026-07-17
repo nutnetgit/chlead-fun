@@ -19,9 +19,10 @@ export async function register() {
   const { runScoreJob } = await import("@/lib/jobs/score");
   const { runNudgeJob } = await import("@/lib/jobs/nudge");
   const { runDigestJob } = await import("@/lib/jobs/digest");
+  const { runChatExtractJob } = await import("@/lib/jobs/chatExtract");
 
   cron.schedule("0 * * * *", async () => {
-    for (const job of [runSlaJob, runScoreJob, runNudgeJob, runDigestJob]) {
+    for (const job of [runSlaJob, runScoreJob, runNudgeJob, runDigestJob, runChatExtractJob]) {
       try {
         const result = await job();
         console.log(`[scheduler] ${job.name}`, result);
