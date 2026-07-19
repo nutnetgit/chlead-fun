@@ -23,7 +23,7 @@
 export type MenuKey =
   | "leads" | "chat" | "pool"
   | "dashboard" | "lead-center" | "runrate" | "events" | "reports"
-  | "settings-teams" | "settings-models" | "settings-quotation" | "settings-conversion-rate" | "settings-sla-rules"
+  | "settings-teams" | "settings-models" | "settings-quotation" | "settings-conversion-rate" | "settings-sla-rules" | "settings-channels"
   | "settings";
 
 export const MENU_DEFS: { key: MenuKey; label: string; roles: string[] | null }[] = [
@@ -54,8 +54,17 @@ export const MENU_DEFS: { key: MenuKey; label: string; roles: string[] | null }[
   // that just flips whether the hourly job runs at all; this page sets the
   // actual day/minute thresholds the job uses when it does run.
   { key: "settings-sla-rules", label: "ตั้งค่า: กฎ SLA", roles: ["manager", "gm", "admin"] },
+  // Split out from the admin catch-all (user req 2026-07-19) so a test/
+  // reviewer account (e.g. for Meta App Review) can be granted just the
+  // Channels page — without it, the only way to see /channels was the
+  // "settings" bundle below, which also opens user management, branches,
+  // LINE OA, automation, logs, and status. Default stays admin/gm since
+  // /api/channels itself is still admin/gm-only server-side (no manager
+  // brand-scoping exists there, unlike settings-models/settings-sla-rules);
+  // a manager only gets in via an explicit per-user override.
+  { key: "settings-channels", label: "ตั้งค่า: ช่องทางรับ Lead", roles: ["admin", "gm"] },
   // Everything else under /settings (users, branches, LINE OA, sources,
-  // channels, automation, logs, status) — admin/gm only, unchanged.
+  // automation, logs, status) — admin/gm only, unchanged.
   { key: "settings", label: "ตั้งค่า (ส่วนแอดมิน)", roles: ["admin", "gm"] },
 ];
 
@@ -95,7 +104,7 @@ const PATH_MENU: [string, MenuKey][] = [
   ["/settings/conversion-rates", "settings-conversion-rate"],
   ["/settings/sla-rules", "settings-sla-rules"],
   ["/settings", "settings"],
-  ["/channels", "settings"],
+  ["/channels", "settings-channels"],
   ["/logs", "settings"],
   ["/status", "settings"],
 ];
@@ -117,6 +126,7 @@ const SETTINGS_LANDING: { key: MenuKey; href: string }[] = [
   { key: "settings-quotation", href: "/settings/quotation-options" },
   { key: "settings-conversion-rate", href: "/settings/conversion-rates" },
   { key: "settings-sla-rules", href: "/settings/sla-rules" },
+  { key: "settings-channels", href: "/channels" },
 ];
 
 export function settingsLandingHref(menus: string[] | null | undefined): string | null {
