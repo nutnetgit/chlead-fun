@@ -139,11 +139,12 @@ Content-Type: application/json
   "user": {
     "fun_user_id": 12, "dms_user_id": 345, "line_userid": "U9f…", "username": "somchai",
     "display_name": "สมชาย ใจดี", "role": "sales",
-    "branch_id": 3, "branch_code": "NPT", "branch_codes": ["NPT", "SLY"], "phone": "0812345678"
+    "branch_id": 3, "branch_code": "NPT", "dms_branch_id": 5, "branch_codes": ["NPT", "SLY"], "phone": "0812345678"
   },
   "lead": {
     "lead_id": 9876, "handoff_id": 41, "dms_pros_id": null, "stage": "booking",
     "brand": "Mazda", "branch_code": "NPT", "branch_name": "Mazda นครปฐม",
+    "sps": { "program": "sales system", "branch_id": 5, "sto_br_id": 1, "brand_desc": "Mazda" },
     "customer": { "person_id": 555, "full_name": "นาย ทดสอบ ระบบ", "nickname": "ต้น", "phone": "0812345678", "line_userid": "Uab…", "address": "99 หมู่ 1 …" },
     "vehicle": { "model": "CX-5", "variant": "2.2 XDL", "color": "Soul Red", "payment_type": "finance", "has_tradein": false },
     "price": { "agreed_price": 1450000, "discount": null, "deposit_expected": null },
@@ -163,10 +164,12 @@ Content-Type: application/json
 
 3. จับคู่ผู้ใช้ SPS: `user.line_userid == user.line_userid` ก่อน → ไม่เจอค่อยใช้ `dms_user_id == user.u_id` → ไม่เจอทั้งคู่ = แสดงข้อความให้ติดต่อแอดมิน (**อย่า** สร้าง user ใหม่อัตโนมัติ)
 4. สร้าง session Better Auth ให้ผู้ใช้คนนั้น (ตามวิธีของ Better Auth ฝั่ง SPS — Lead FUN ไม่ยุ่งกับ session ของ SPS)
-5. redirect ไปหน้าจอง โดยใช้พารามิเตอร์ที่ `booking_form.php` รับอยู่แล้ว:
-   `booking_form.php?click_from=leadfun&pros_id=<handoff_id>&u_id=<u_id>&cus_id=<cus_id ถ้าจับคู่ลูกค้าได้>`
-   - `handoff_id` = แถวใน `fun_booking_handoff` ของ Lead FUN (ข้อมูล prefill อยู่ใน payload ข้อ 2 แล้ว ไม่ต้องเรียกกลับมาอีก)
-   - ถ้า SPS อยากบันทึกเลข prospect ของตัวเองกลับมา ให้เก็บ `lead_id` ไว้ (เฟสถัดไปจะมี endpoint รับ `dms_pros_id`)
+5. **สลับสาขาให้ตรงกับยี่ห้อของ Lead ก่อน แล้วค่อยเข้าใบจอง** — ดู §3.4 ด้านล่าง สรุปคือ
+   - สร้าง/ค้นแถว `prospectcontact` ของ Lead นี้ โดยตั้ง `branch_id = lead.sps.branch_id` และ `sto_br_desc` ตาม `lead.sps.sto_br_id` แล้วได้ `pros_id` ของ SPS เอง
+   - redirect ผ่าน `login.php` เพื่อให้ session สลับสาขา/ยี่ห้อ ไม่ใช่ยิงเข้า `booking_form.php` ตรงๆ:
+     `login.php?program=sales%20system&branch=<lead.sps.branch_id>&goto_sps_booking=yes&Submit_right=จองรถ&pros_id=<pros_id>&cus_id=<cus_id>&u_id=<u_id>`
+   - ข้อมูล prefill อยู่ใน payload ข้อ 2 แล้ว ไม่ต้องเรียกกลับมาอีก · `handoff_id` เก็บไว้อ้างอิงกลับได้
+   - ถ้า SPS อยากบันทึกเลข prospect ของตัวเองกลับมา ให้เก็บ `lead_id` คู่กับ `pros_id` ไว้ (เฟสถัดไปจะมี endpoint รับ `dms_pros_id`)
 6. log การรับ ticket ฝั่ง SPS (ใคร เมื่อไร IP ผลอะไร) — Lead FUN log ฝั่งตัวเองแล้ว
 
 ตัวอย่าง PHP (ย่อ):
@@ -185,8 +188,39 @@ if (!($res['ok'] ?? false)) { /* แสดง error code, log, หยุด */ }
 $u = $res['user'];
 // 1) หา user SPS: line_userid ก่อน แล้ว u_id
 // 2) สร้าง session (Better Auth)
-// 3) header('Location: booking_form.php?click_from=leadfun&pros_id=' . (int)$res['lead']['handoff_id'] . '&u_id=' . (int)$spsUid);
+// 3) $sps = $res['lead']['sps'];                       // branch_id/sto_br_id ของ SPS เอง
+//    $prosId = upsert_prospectcontact($res['lead'], $sps); // สร้าง prospect ในสาขานั้น
+//    header('Location: login.php?program=sales%20system&branch=' . (int)$sps['branch_id']
+//           . '&goto_sps_booking=yes&Submit_right=' . rawurlencode('จองรถ')
+//           . '&pros_id=' . (int)$prosId . '&cus_id=' . (int)$cusId . '&u_id=' . (int)$spsUid);
 ```
+
+### 3.4 ยี่ห้อกับสาขา — SPS สลับยี่ห้อด้วยการสลับ "สาขา"
+
+ตรวจ source ของ SPS แล้ว (`sps/login.php`, `sps/booking_form.php`) พบว่า:
+
+- SPS **ไม่มี** session ของ "บริษัท" หรือ "ยี่ห้อ" ให้เลือกเอง ไม่มีตาราง company · มิติเดียวที่ใช้แบ่งคือ **สาขา** (`branch.branch_id`)
+- ยี่ห้อถูกอนุมานจากสาขา: `login.php` อ่าน `branch.sto_br_id` แล้วตั้ง `$_SESSION['admin_brand_id']` / `admin_brand_desc` ให้เอง
+- เมนู "สาขา" ในทุกหน้าของ SPS ก็คือลิงก์ `login.php?program=sales system&branch=<branch_id>` ซึ่งใช้ credential ที่ค้างใน session อยู่แล้ว จึงไม่ต้องกรอกรหัสผ่านซ้ำ
+- มีตัวอย่างการ deep-link อยู่ใน SPS เองแล้วที่ `pros_form2.php` → `login.php?...&goto_sps_booking=yes&Submit_right=จองรถ&pros_id=…&cus_id=…&u_id=…` และ `login.php` จะ redirect ต่อเข้า `booking_form.php` ให้ — **ใช้เส้นทางเดิมนี้ ไม่ต้องเขียนใหม่**
+
+ดังนั้นฝั่ง Lead FUN จึงเก็บรหัสของ SPS ไว้ตรงๆ (sql/035) และส่งมาให้ในบล็อก `lead.sps`:
+
+| ฟิลด์ | มาจาก | ใช้ทำอะไร |
+|---|---|---|
+| `sps.branch_id` | `fun_branch.dms_branch_id` = `branch.branch_id` ของ SPS | ใส่ใน `login.php?branch=` เพื่อสลับสาขา ยี่ห้อจะตามมาเอง |
+| `sps.sto_br_id` | `fun_brand.dms_brand_id` = `stock_brand.sto_br_id` | ไว้ตรวจทานว่ายี่ห้อที่ SPS อนุมานได้ตรงกับ Lead |
+| `sps.brand_desc` | ชื่อยี่ห้อใน Lead FUN | ใช้เทียบกับ `stock_brand.sto_br_desc` ตอนสร้าง prospect |
+
+แอดมิน Lead FUN กรอกการจับคู่นี้ที่ **ตั้งค่า › สาขาและแบรนด์** · สาขาที่ยังไม่ผูก ปุ่ม "เปิดใบจองใน SPS" จะไม่ยอมออก ticket และแจ้งให้ไปกรอกก่อน แทนที่จะพาไปเปิดใบจองผิดโชว์รูม
+
+**ข้อควรระวังที่เจอใน source ของ SPS**
+
+1. `booking_form.php` และ `booking_form4.php` **ไม่ได้** ใช้ `branch` จาก URL ในการตัดสินว่าใบจองอยู่สาขาไหน แต่ไปอ่านจากแถว `prospectcontact` ของ `pros_id` นั้น แล้วเขียนทับ session อีกรอบตอนกดบันทึก ⇒ `pros_id` ที่ส่งเข้าไปต้องเป็น prospect ที่ `branch_id` ตรงกับ `sps.branch_id` มิฉะนั้นใบจองจะถูกบันทึกคนละสาขากับที่ผู้ใช้เห็นบนหัวจอ
+2. `pros_id` ที่ SPS รับ คือ `prospectcontact.pros_id` **ของ SPS เอง** ไม่ใช่ `handoff_id` ของ Lead FUN ⇒ `sso_land.php` ต้องสร้างหรือค้นแถว prospect ก่อน แล้วส่ง id ของ SPS
+3. ผู้ใช้ต้องมีแถว `user_branch(u_id, branch_id)` ของสาขานั้น ไม่งั้น `login.php` เด้งกลับหน้า login พร้อม `msg_login_fail` ⇒ ถ้าเซลส์คนนั้นยังไม่มีสิทธิ์สาขานั้นใน SPS ให้แสดงข้อความให้ติดต่อแอดมิน อย่าสร้างสิทธิ์ให้อัตโนมัติ
+4. `login.php` มี `checkIp()` ⇒ ถ้าเรียกจากนอกออฟฟิศต้องปลดที่ `adam_<branch>_config` (`config_code='10'` = `"0"`) หรือใช้ทางที่ตกลงกันไว้ อย่าใช้ `log_backdoor` เป็นทางถาวร
+5. ทุก query ใน SPS ต่อสตริงดิบไม่ escape ⇒ ค่าที่ส่งใน URL ต้อง cast เป็น int ทุกตัวก่อนใช้ (`(int)$_REQUEST['pros_id']` ฯลฯ)
 
 ### 3.3 ขาเข้า — เมนู "Lead FUN" ใน SPS
 

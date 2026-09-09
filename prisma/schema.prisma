@@ -180,6 +180,9 @@ model Branch {
   branchName      String  @map("branch_name") @db.VarChar(100)
   branchCode      String? @unique @map("branch_code") @db.VarChar(10)
   brandId         Int?    @map("brand_id")
+  // SPS `branch.branch_id` this showroom is (sql/035). The SSO handoff needs
+  // it because SPS switches brand by switching BRANCH — see docs/SPS_INTEGRATION.md §3.
+  dmsBranchId     Int?    @map("dms_branch_id")
   companyCode     String? @map("company_code") @db.VarChar(10)
   // Registered juristic entity details per branch (user req 2026-07-11) —
   // stored for future use on printed documents (quotations, etc.), not
@@ -190,6 +193,7 @@ model Branch {
   leads           Lead[]
   userLinks       UserBranch[]
 
+  @@unique([dmsBranchId], map: "uk_branch_dms")
   @@map("fun_branch")
 }
 
@@ -209,9 +213,13 @@ model UserBranch {
 model Brand {
   brandId    Int    @id @default(autoincrement()) @map("brand_id")
   brandName  String @unique @map("brand_name") @db.VarChar(50)
+  // SPS `stock_brand.sto_br_id` (sql/035) — carried in the SSO payload so SPS
+  // can sanity-check the brand it derives from the branch.
+  dmsBrandId Int?   @map("dms_brand_id")
   leads      Lead[]
   lineConfig BrandLineConfig?
 
+  @@unique([dmsBrandId], map: "uk_brand_dms")
   @@map("fun_brand")
 }
 

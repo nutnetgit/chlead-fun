@@ -51,6 +51,17 @@ export async function POST(request: NextRequest) {
         brand: l.brand.brandName,
         branch_code: l.branch.branchCode ?? l.branch.branchName,
         branch_name: l.branch.branchName,
+        // What SPS actually needs to land in the right showroom: it has no
+        // company/brand switch of its own, brand is read off the branch
+        // (branch.sto_br_id). `branch_id` is SPS's own branch.branch_id
+        // (mapped in ตั้งค่า › สาขาและแบรนด์, sql/035) — feed it straight to
+        // login.php?program=sales system&branch=… See SPS_INTEGRATION.md §3.2.
+        sps: {
+          program: "sales system",
+          branch_id: l.branch.dmsBranchId,
+          sto_br_id: l.brand.dmsBrandId,
+          brand_desc: l.brand.brandName,
+        },
         customer: {
           person_id: Number(l.personId),
           full_name: handoff?.customerFullname ?? ([l.person.prefix, l.person.firstName, l.person.lastName].filter(Boolean).join(" ") || null),
@@ -79,6 +90,7 @@ export async function POST(request: NextRequest) {
       role: user.role,
       branch_id: user.branchId,
       branch_code: home?.branchCode ?? home?.branchName ?? null,
+      dms_branch_id: home?.dmsBranchId ?? null,
       branch_codes: user.branchLinks.map((b) => b.branch.branchCode ?? b.branch.branchName),
       phone: user.phone,
     },

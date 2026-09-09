@@ -38,6 +38,15 @@ export async function POST(request: NextRequest) {
   if (!user.lineUserid && !user.dmsUserId) {
     return NextResponse.json({ error: "บัญชีของคุณยังไม่ได้ผูกกับ SPS (ไม่มี LINE และไม่มีรหัสผู้ใช้ SPS) — แจ้งแอดมิน" }, { status: 409 });
   }
+  // SPS has no "current brand" of its own: brand is derived from the branch
+  // the session is logged into (branch.sto_br_id). So the lead's own branch —
+  // not the salesperson's — decides which showroom SPS must switch to, and we
+  // can only say that if this branch is mapped to an SPS branch_id (sql/035).
+  // Refuse early rather than dump the booking into the wrong showroom.
+  if (!lead.branch.dmsBranchId) {
+    audit({ action: "auth.sso_issue", result: "denied", source: "sso", entityType: "lead", entityId: leadId, branchId: lead.branchId, detail: "branch not mapped to SPS" });
+    return NextResponse.json({ error: `สาขา "${lead.branch.branchName}" ยังไม่ได้ผูกรหัสสาขาใน SPS — ให้แอดมินกรอกที่ ตั้งค่า › สาขาและแบรนด์` }, { status: 409 });
+  }
 
   const [model, quote] = await Promise.all([
     lead.interestedModelId ? prisma.vehicleModel.findUnique({ where: { modelId: lead.interestedModelId } }) : null,
@@ -65,7 +74,7 @@ export async function POST(request: NextRequest) {
   });
 
   const { ticket, expiresAt } = await issueTicket({ direction: "out", userId: user.userId, leadId, handoffId: handoff.handoffId });
-  audit({ action: "auth.sso_issue", source: "sso", entityType: "lead", entityId: leadId, branchId: lead.branchId, detail: `out → SPS, handoff #${handoff.handoffId}` });
+  audit({ action: "auth.sso_issue", source: "sso", entityType: "lead", entityId: leadId, branchId: lead.branchId, detail: `out → SPS branch ${lead.branch.dmsBranchId} (${lead.brand.brandName}), handoff #${handoff.handoffId}` });
 
   const sep = landingUrl.includes("?") ? "&" : "?";
   return NextResponse.json({ ok: true, redirectUrl: `${landingUrl}${sep}ticket=${encodeURIComponent(ticket)}`, expiresAt, handoffId: Number(handoff.handoffId) });

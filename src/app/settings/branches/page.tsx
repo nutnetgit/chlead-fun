@@ -4,18 +4,19 @@
 // fun_channel_config routing → keep codes short/stable (e.g. NPT, SLY).
 
 import { useEffect, useRef, useState } from "react";
-import { Plus, Pencil, Loader2, X, Trash2 } from "lucide-react";
+import { Plus, Pencil, Loader2, X, Trash2, Link2 } from "lucide-react";
 import { Card, Toggle, inputCls } from "@/components/ui";
 import { SettingsShell } from "@/components/SettingsShell";
 
-type BrandRow = { brandId: number; brandName: string };
+type BrandRow = { brandId: number; brandName: string; dmsBrandId: number | null };
 type BranchRow = {
   branchId: number; branchName: string; branchCode: string | null; brandId: number | null; brandName: string | null; isActive: boolean;
+  dmsBranchId: number | null;
   companyNameFull: string | null; companyAddress: string | null;
 };
 
-type Draft = { branchName: string; branchCode: string; brandId: string; companyNameFull: string; companyAddress: string };
-const EMPTY: Draft = { branchName: "", branchCode: "", brandId: "", companyNameFull: "", companyAddress: "" };
+type Draft = { branchName: string; branchCode: string; brandId: string; dmsBranchId: string; companyNameFull: string; companyAddress: string };
+const EMPTY: Draft = { branchName: "", branchCode: "", brandId: "", dmsBranchId: "", companyNameFull: "", companyAddress: "" };
 
 export default function BranchesPage() {
   const [brands, setBrands] = useState<BrandRow[]>([]);
@@ -35,6 +36,7 @@ export default function BranchesPage() {
     setEditingId(b.branchId);
     setDraft({
       branchName: b.branchName, branchCode: b.branchCode ?? "", brandId: b.brandId ? String(b.brandId) : "",
+      dmsBranchId: b.dmsBranchId ? String(b.dmsBranchId) : "",
       companyNameFull: b.companyNameFull ?? "", companyAddress: b.companyAddress ?? "",
     });
     setTimeout(() => editFormRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 50);
@@ -46,6 +48,7 @@ export default function BranchesPage() {
     setSaving(true); setError(null);
     const body = {
       branchName: draft.branchName, branchCode: draft.branchCode, brandId: draft.brandId ? Number(draft.brandId) : null,
+      dmsBranchId: draft.dmsBranchId.trim() ? Number(draft.dmsBranchId) : null,
       companyNameFull: draft.companyNameFull, companyAddress: draft.companyAddress,
     };
     const res = await fetch(editingId === null ? "/api/branches" : `/api/branches/${editingId}`, {
@@ -85,6 +88,18 @@ export default function BranchesPage() {
     if (!res.ok) alert((await res.json().catch(() => ({}))).error ?? "ลบไม่สำเร็จ");
     load();
   }
+  // SPS's stock_brand.sto_br_id for this marque (sql/035) — only used to
+  // sanity-check the brand SPS derives from the branch during the handoff.
+  async function setBrandDms(b: BrandRow) {
+    const v = prompt(`รหัสยี่ห้อใน SPS (stock_brand.sto_br_id) ของ "${b.brandName}"
+เว้นว่าง = ยังไม่ผูก`, b.dmsBrandId ? String(b.dmsBrandId) : "");
+    if (v === null) return;
+    const dmsBrandId = v.trim() ? Number(v) : null;
+    if (dmsBrandId !== null && !Number.isInteger(dmsBrandId)) { alert("ต้องเป็นตัวเลข"); return; }
+    const res = await fetch(`/api/brands/${b.brandId}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ dmsBrandId }) });
+    if (!res.ok) alert((await res.json().catch(() => ({}))).error ?? "แก้ไขไม่สำเร็จ");
+    load();
+  }
   async function renameBrand(b: BrandRow) {
     const name = prompt("ชื่อแบรนด์ใหม่:", b.brandName);
     if (!name?.trim() || name === b.brandName) return;
@@ -112,6 +127,8 @@ export default function BranchesPage() {
           {brands.map((b) => (
             <span key={b.brandId} className="inline-flex items-center gap-1.5 text-[.8rem] bg-[var(--bg)] border border-[var(--border)] rounded-full pl-3 pr-1.5 py-1">
               {b.brandName}
+              {b.dmsBrandId !== null && <span className="text-[.62rem] font-mono text-[var(--text-3)]" title="รหัสยี่ห้อใน SPS">SPS {b.dmsBrandId}</span>}
+              <button onClick={() => setBrandDms(b)} className="p-0.5 rounded hover:bg-white" title="ผูกรหัสยี่ห้อใน SPS"><Link2 size={11} /></button>
               <button onClick={() => renameBrand(b)} className="p-0.5 rounded hover:bg-white" title="แก้ชื่อ"><Pencil size={11} /></button>
               <button onClick={() => removeBrand(b)} className="p-0.5 rounded hover:bg-[var(--red-soft)] text-[var(--red)]" title="ลบ (เมื่อไม่มีการใช้งาน)"><Trash2 size={11} /></button>
             </span>
@@ -137,6 +154,7 @@ export default function BranchesPage() {
                   <div className="flex-1">
                     <span className="text-sm font-medium">{b.branchName}</span>
                     {b.branchCode && <span className="ml-2 text-[.68rem] font-mono bg-[var(--bg)] px-1.5 py-0.5 rounded">{b.branchCode}</span>}
+                    {b.dmsBranchId !== null && <span className="ml-1.5 text-[.68rem] font-mono text-[var(--text-3)]" title="รหัสสาขาใน SPS">SPS #{b.dmsBranchId}</span>}
                   </div>
                   <Toggle on={b.isActive} onClick={() => toggleActive(b)} />
                   <button onClick={() => startEdit(b)} className="p-1.5 rounded hover:bg-[var(--accent-soft)]" title="แก้ไข"><Pencil size={14} /></button>
@@ -160,6 +178,10 @@ export default function BranchesPage() {
             <input value={draft.branchCode} onChange={(e) => setDraft({ ...draft, branchCode: e.target.value })} className={inputCls + " font-mono"} placeholder="เช่น NPT" maxLength={10} />
           </label>
           <label className="block">
+            <span className="text-[11px] font-medium text-[var(--text-2)] mb-1 block">รหัสสาขาใน SPS</span>
+            <input value={draft.dmsBranchId} onChange={(e) => setDraft({ ...draft, dmsBranchId: e.target.value.replace(/[^0-9]/g, "") })} className={inputCls + " font-mono"} placeholder="เช่น 2" inputMode="numeric" />
+          </label>
+          <label className="block">
             <span className="text-[11px] font-medium text-[var(--text-2)] mb-1 block">แบรนด์</span>
             <select value={draft.brandId} onChange={(e) => setDraft({ ...draft, brandId: e.target.value })} className={inputCls}>
               <option value="">— ไม่ระบุ —</option>
@@ -177,6 +199,7 @@ export default function BranchesPage() {
             <input value={draft.companyAddress} onChange={(e) => setDraft({ ...draft, companyAddress: e.target.value })} className={inputCls} placeholder="ที่อยู่เต็มสำหรับออกเอกสาร" />
           </label>
         </div>
+        <p className="text-[11px] text-[var(--text-3)]">รหัสสาขาใน SPS = <code>branch.branch_id</code> ของระบบขายเดิม — ใช้ตอนส่ง Lead ที่ปิดการขายไปเปิดใบจอง SPS จะสลับยี่ห้อตามสาขานี้ให้เอง สาขาที่ยังไม่ผูกจะกดส่งต่อไม่ได้</p>
         <p className="text-[11px] text-[var(--text-3)]">ชื่อเต็มบริษัท/ที่อยู่ — เก็บไว้เผื่อดึงไปใช้ในเอกสาร (ใบเสนอราคา ฯลฯ) ยังไม่มีจุดใดดึงไปใช้อัตโนมัติ</p>
         {error && <p className="text-xs text-[var(--red)]">❌ {error}</p>}
         <div className="flex items-center gap-2">

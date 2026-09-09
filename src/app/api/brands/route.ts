@@ -11,7 +11,7 @@ import { audit } from "@/lib/audit";
 // src/lib/lineConfig.ts).
 export async function GET() {
   const brands = await prisma.brand.findMany({ orderBy: { brandId: "asc" }, include: { lineConfig: true } });
-  return NextResponse.json(brands.map((b) => ({ brandId: b.brandId, brandName: b.brandName, liffId: b.lineConfig?.liffId ?? null })));
+  return NextResponse.json(brands.map((b) => ({ brandId: b.brandId, brandName: b.brandName, liffId: b.lineConfig?.liffId ?? null, dmsBrandId: b.dmsBrandId })));
 }
 
 export async function POST(request: NextRequest) {

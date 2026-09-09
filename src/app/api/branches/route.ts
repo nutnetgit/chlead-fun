@@ -15,9 +15,9 @@ export async function GET(request: NextRequest) {
     // liffId is public/non-secret (embedded in customer-facing QR URLs) —
     // used by QrLeadModal to build the per-brand LIFF link (user req
     // 2026-07-11, see src/lib/lineConfig.ts).
-    brands: brands.map((b) => ({ brandId: b.brandId, brandName: b.brandName, liffId: b.lineConfig?.liffId ?? null })),
+    brands: brands.map((b) => ({ brandId: b.brandId, brandName: b.brandName, liffId: b.lineConfig?.liffId ?? null, dmsBrandId: b.dmsBrandId })),
     branches: branches.map((b) => ({
-      branchId: b.branchId, branchName: b.branchName, branchCode: b.branchCode,
+      branchId: b.branchId, branchName: b.branchName, branchCode: b.branchCode, dmsBranchId: b.dmsBranchId,
       brandId: b.brandId, brandName: b.brandId ? brandById.get(b.brandId) ?? null : null,
       isActive: !!b.isActive,
       companyNameFull: b.companyNameFull, companyAddress: b.companyAddress,
@@ -40,6 +40,7 @@ export async function POST(request: NextRequest) {
         branchName: b.branchName.trim(),
         branchCode: typeof b.branchCode === "string" ? b.branchCode.trim().toUpperCase() || null : null,
         brandId: typeof b.brandId === "number" ? b.brandId : null,
+        dmsBranchId: typeof b.dmsBranchId === "number" ? b.dmsBranchId : null,
         companyNameFull: typeof b.companyNameFull === "string" ? b.companyNameFull.trim() || null : null,
         companyAddress: typeof b.companyAddress === "string" ? b.companyAddress.trim() || null : null,
       },
@@ -47,7 +48,7 @@ export async function POST(request: NextRequest) {
     audit({ action: "settings.update", entityType: "branch", entityId: row.branchId, branchId: row.branchId, after: { branchName: row.branchName, branchCode: row.branchCode, brandId: row.brandId }, detail: "create" });
     return NextResponse.json({ ok: true, branchId: row.branchId }, { status: 201 });
   } catch (e) {
-    const msg = String(e).includes("P2002") ? "รหัสสาขานี้ถูกใช้แล้ว" : "บันทึกไม่สำเร็จ";
+    const msg = String(e).includes("P2002") ? "รหัสสาขา หรือรหัสสาขาใน SPS นี้ถูกใช้แล้ว" : "บันทึกไม่สำเร็จ";
     return NextResponse.json({ error: msg }, { status: 409 });
   }
 }

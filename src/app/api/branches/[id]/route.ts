@@ -18,6 +18,8 @@ export async function PUT(request: NextRequest, { params }: Ctx) {
   if (typeof b.branchName === "string" && b.branchName.trim()) data.branchName = b.branchName.trim();
   if (typeof b.branchCode === "string") data.branchCode = b.branchCode.trim().toUpperCase() || null;
   if (typeof b.brandId === "number" || b.brandId === null) data.brandId = b.brandId;
+  // SPS branch id (sql/035) — 0/empty clears it, so a wrong mapping can be undone.
+  if (typeof b.dmsBranchId === "number" || b.dmsBranchId === null) data.dmsBranchId = b.dmsBranchId || null;
   if (typeof b.isActive === "boolean") data.isActive = b.isActive ? 1 : 0;
   if (typeof b.companyNameFull === "string") data.companyNameFull = b.companyNameFull.trim() || null;
   if (typeof b.companyAddress === "string") data.companyAddress = b.companyAddress.trim() || null;
@@ -29,7 +31,7 @@ export async function PUT(request: NextRequest, { params }: Ctx) {
     audit({ action: "settings.update", entityType: "branch", entityId: branchId, branchId, ...diffFields(before as unknown as Record<string, unknown>, data) });
     return NextResponse.json({ ok: true });
   } catch (e) {
-    const msg = String(e).includes("P2002") ? "รหัสสาขานี้ถูกใช้แล้ว" : "ไม่พบสาขา";
+    const msg = String(e).includes("P2002") ? "รหัสสาขา หรือรหัสสาขาใน SPS นี้ถูกใช้แล้ว" : "ไม่พบสาขา";
     return NextResponse.json({ error: msg }, { status: 409 });
   }
 }

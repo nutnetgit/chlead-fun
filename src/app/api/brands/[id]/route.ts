@@ -12,13 +12,18 @@ export async function PUT(request: NextRequest, { params }: Ctx) {
   const { id } = await params;
   const brandId = Number(id);
   if (!Number.isInteger(brandId)) return NextResponse.json({ error: "bad id" }, { status: 400 });
-  const b = (await request.json().catch(() => ({}))) as { brandName?: string };
+  const b = (await request.json().catch(() => ({}))) as { brandName?: string; dmsBrandId?: number | null };
   const name = b.brandName?.trim();
-  if (!name) return NextResponse.json({ error: "missing brandName" }, { status: 400 });
+  // Either field alone is a valid edit: renaming, or just filling in the SPS
+  // stock_brand.sto_br_id used by the SSO handoff (sql/035).
+  const data: { brandName?: string; dmsBrandId?: number | null } = {};
+  if (name) data.brandName = name;
+  if (typeof b.dmsBrandId === "number" || b.dmsBrandId === null) data.dmsBrandId = b.dmsBrandId || null;
+  if (!Object.keys(data).length) return NextResponse.json({ error: "missing brandName" }, { status: 400 });
   try {
     const before = await prisma.brand.findUnique({ where: { brandId } });
-    await prisma.brand.update({ where: { brandId }, data: { brandName: name } });
-    audit({ action: "settings.update", entityType: "brand", entityId: brandId, before: { brandName: before?.brandName }, after: { brandName: name } });
+    await prisma.brand.update({ where: { brandId }, data });
+    audit({ action: "settings.update", entityType: "brand", entityId: brandId, before: { brandName: before?.brandName, dmsBrandId: before?.dmsBrandId }, after: data });
     return NextResponse.json({ ok: true });
   } catch {
     return NextResponse.json({ error: "แก้ไขไม่สำเร็จ (ชื่อซ้ำหรือไม่พบแบรนด์)" }, { status: 409 });
