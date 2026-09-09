@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { auth, authEnabled } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { resolvePerms, roleDefaultPerms } from "@/lib/menuAccess";
+import { visibleBranches } from "@/lib/authz";
 
 export const runtime = "nodejs";
 
@@ -23,6 +24,9 @@ export async function GET() {
   // `perms` drives per-button visibility. Server routes re-check via requirePerm.
   // Admin is never restricted by rows (same rule as requirePerm).
   const perms = fu.role === "admin" ? roleDefaultPerms("admin") : resolvePerms(fu.role, fu.menuRows);
+  // Branches this user may pick in the header badge / page BranchPicker
+  // (user req 2026-09-09, CPT parity).
+  const branches = await visibleBranches(fu.userId, fu.role);
 
   return NextResponse.json({
     authEnabled: true,
@@ -41,6 +45,7 @@ export async function GET() {
       mustChangePassword: !!fu.mustChangePassword,
       menus: Object.keys(perms),
       perms,
+      branches,
     },
   });
 }

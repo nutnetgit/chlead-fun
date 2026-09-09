@@ -1,6 +1,6 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { requirePerm, managerAllowedBranchIds } from "@/lib/authz";
+import { requirePerm, managerAllowedBranchIds, requestedBranchScope } from "@/lib/authz";
 import { hasPerm } from "@/lib/menuAccess";
 
 // Unclaimed fun_lead_pool entries, hot-first (handoff §5: "hot ใน pool แจกต่อใน 24 ชม.").
@@ -8,7 +8,7 @@ import { hasPerm } from "@/lib/menuAccess";
 // belonging to their own branches — a Mazda salesperson must not fish leads
 // out of the Ford pool. admin/gm see everything; a user with no branch links
 // at all falls back to everything (same graceful rule as the QR modal).
-export async function GET() {
+export async function GET(request: NextRequest) {
   const rq = await requirePerm("pool");
   if (!rq.ok) return rq.response;
 
@@ -17,6 +17,9 @@ export async function GET() {
     const allowed = await managerAllowedBranchIds(rq.funUserId!);
     if (allowed.length) branchScope = allowed;
   }
+  const picked = await requestedBranchScope(branchScope, request.nextUrl.searchParams.get("branchId"));
+  if (!picked.ok) return picked.response;
+  branchScope = picked.scope;
 
   const rows = await prisma.leadPool.findMany({
     where: { claimedAt: null },

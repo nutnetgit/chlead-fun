@@ -10,6 +10,7 @@ import { Loader2, Flame, Snowflake, Sun } from "lucide-react";
 import { Card, inputCls } from "@/components/ui";
 import { fmtDateTime } from "@/lib/date";
 import { useMe } from "@/components/Chrome";
+import { BranchPicker, useBranchFilter } from "@/components/BranchPicker";
 
 type PoolRow = {
   poolId: number; leadId: number; enteredAt: string; enteredReason: string; priority: number;
@@ -33,12 +34,13 @@ export default function PoolPage() {
   const [picked, setPicked] = useState<Record<number, string>>({});
   const [claiming, setClaiming] = useState<number | null>(null);
 
+  const [branch, setBranch] = useBranchFilter();
   const load = () => {
-    fetch("/api/pool").then((r) => r.json()).then(setRows);
+    fetch(`/api/pool${branch ? `?branchId=${branch}` : ""}`).then((r) => r.json()).then(setRows);
     fetch("/api/users").then((r) => r.json()).then((u: UserRow[]) => setAllUsers(u));
     fetch("/api/branches").then((r) => r.json()).then((d) => setBranches(d.branches ?? []));
   };
-  useEffect(() => { load(); }, []);
+  useEffect(() => { load(); }, [branch]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const users = allUsers.filter((u) => u.role === "sales");
   const role = me?.user?.role;
@@ -95,6 +97,7 @@ export default function PoolPage() {
         title="Lead Pool — รอแจกต่อ"
         desc="Lead ที่ถูกริบ (หลุด SLA) หรือผจก. สั่งย้าย — เรียงตาม temperature ก่อน (hot มาก่อน) แล้วตามเวลาเข้า pool"
       >
+        <div className="flex justify-end -mt-1 mb-2"><BranchPicker value={branch} onChange={setBranch} /></div>
         {rows === null ? (
           <p className="text-sm text-[var(--muted-foreground)]">Loading…</p>
         ) : rows.length === 0 ? (

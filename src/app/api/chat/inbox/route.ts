@@ -1,6 +1,6 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { requirePerm, branchScopeFor } from "@/lib/authz";
+import { requirePerm, branchScopeFor, requestedBranchScope } from "@/lib/authz";
 
 /**
  * Chat inbox list (user req 2026-07-08) — one row per lead that has at least
@@ -11,7 +11,7 @@ import { requirePerm, branchScopeFor } from "@/lib/authz";
  * 2026-07-13): the webhook now drops messages that don't resolve to a
  * QR-registered lead instead of storing them with leadId null.
  */
-export async function GET() {
+export async function GET(request: NextRequest) {
   const rq = await requirePerm("chat");
   if (!rq.ok) return rq.response;
 
@@ -19,7 +19,9 @@ export async function GET() {
   // brand's conversations) — same rule as /api/leads: manager sees only
   // threads of leads in their own branches (unless chat·viewall); admin/gm
   // global; no links → graceful fallback to everything.
-  const branchScope = await branchScopeFor(rq, "chat", rq.perms);
+  const picked = await requestedBranchScope(await branchScopeFor(rq, "chat", rq.perms), request.nextUrl.searchParams.get("branchId"));
+  if (!picked.ok) return picked.response;
+  const branchScope = picked.scope;
 
   const grouped = await prisma.chatMessage.groupBy({
     by: ["leadId"],

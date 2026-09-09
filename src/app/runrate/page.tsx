@@ -7,6 +7,7 @@ import { useEffect, useState, useCallback } from "react";
 import { Loader2, TrendingUp, AlertTriangle } from "lucide-react";
 import { Card, inputCls, InfoTip } from "@/components/ui";
 import { useMe } from "@/components/Chrome";
+import { BranchPicker, useBranchFilter } from "@/components/BranchPicker";
 
 type Data = {
   scope: string;
@@ -44,10 +45,12 @@ export default function RunRatePage() {
   const [perUser, setPerUser] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
 
+  const [branch, setBranch] = useBranchFilter();
   const load = useCallback(() => {
     const params = new URLSearchParams();
     if (isSales && me?.user) params.set("owner", String(me.user.funUserId));
     if (brandFilter !== null) params.set("brandId", String(brandFilter));
+    if (branch) params.set("branchId", branch);
     const q = params.toString() ? `?${params.toString()}` : "";
     fetch(`/api/runrate${q}`).then((r) => r.json()).then((data: Data) => {
       setD(data);
@@ -56,7 +59,7 @@ export default function RunRatePage() {
       // re-keying needed.
       setPerUser(Object.fromEntries(Object.entries(data.config.perUser).map(([k, v]) => [k, String(v)])));
     });
-  }, [isSales, me, brandFilter]);
+  }, [isSales, me, brandFilter, branch]);
   useEffect(() => { load(); }, [load]);
   useEffect(() => {
     fetch("/api/users").then((r) => r.json()).then((us: UserRow[]) => setAllUsers(us));
@@ -164,6 +167,7 @@ export default function RunRatePage() {
 
       {myBrands.length > 1 && (
         <div className="flex items-center gap-2 flex-wrap">
+          <BranchPicker value={branch} onChange={setBranch} className="mr-2" />
           <span className="text-[11px] font-medium text-[var(--text-3)]">ยี่ห้อ</span>
           {myBrands.map((b) => (
             <button key={b.brandId} onClick={() => setBrandFilter(b.brandId)}

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { requirePerm, branchScopeFor, managerAllowedBranchIds } from "@/lib/authz";
+import { requirePerm, branchScopeFor, managerAllowedBranchIds, requestedBranchScope } from "@/lib/authz";
 import { hasPerm } from "@/lib/menuAccess";
 import { audit } from "@/lib/audit";
 
@@ -40,6 +40,10 @@ export async function GET(request: NextRequest) {
     const allowed = await managerAllowedBranchIds(rq.funUserId!);
     if (allowed.length) branchScope = allowed;
   }
+  // BranchPicker (?branchId=) may only narrow within the scope above.
+  const picked = await requestedBranchScope(branchScope, p.get("branchId"));
+  if (!picked.ok) return picked.response;
+  branchScope = picked.scope;
   const branchWhere = branchScope ? { branchId: { in: branchScope } } : {};
 
   const endOfToday = new Date();

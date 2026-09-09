@@ -13,6 +13,7 @@ import Link from "next/link";
 import { Loader2, MessageCircle, Flame, Inbox as InboxIcon, AlertOctagon } from "lucide-react";
 import { InfoTip } from "@/components/ui";
 import { useMe } from "@/components/Chrome";
+import { BranchPicker, useBranchFilter } from "@/components/BranchPicker";
 
 type Dash = {
   active: number; dueToday: number; openBreaches: number; poolWaiting: number; conflicts: number;
@@ -71,10 +72,14 @@ export default function DashboardPage() {
   const [branches, setBranches] = useState<BranchRow[]>([]);
   const [brandFilter, setBrandFilter] = useState<number | null>(null);
 
+  const [branch, setBranch] = useBranchFilter();
   const load = useCallback(() => {
-    const q = brandFilter !== null ? `?brandId=${brandFilter}` : "";
+    const params = new URLSearchParams();
+    if (brandFilter !== null) params.set("brandId", String(brandFilter));
+    if (branch) params.set("branchId", branch);
+    const q = params.toString() ? `?${params}` : "";
     fetch(`/api/dashboard${q}`).then((r) => r.json()).then(setD);
-  }, [brandFilter]);
+  }, [brandFilter, branch]);
   useEffect(() => { load(); }, [load]);
   useEffect(() => {
     fetch("/api/users").then((r) => r.json()).then(setAllUsers);
@@ -137,6 +142,7 @@ export default function DashboardPage() {
           brand at a time, same reasoning as Run Rate. */}
       {myBrands.length > 1 && (
         <div className="flex items-center gap-2 flex-wrap">
+          <BranchPicker value={branch} onChange={setBranch} className="mr-2" />
           <span className="text-[11px] font-medium text-[var(--text-3)]">ยี่ห้อ</span>
           {myBrands.map((b) => (
             <button key={b.brandId} onClick={() => setBrandFilter(b.brandId)}

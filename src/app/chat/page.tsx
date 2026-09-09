@@ -11,6 +11,7 @@ import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { Send, Loader2, ChevronLeft, FileText } from "lucide-react";
 import { fmtRelativeDay, fmtDateTime } from "@/lib/date";
+import { BranchPicker, useBranchFilter } from "@/components/BranchPicker";
 
 type Conversation = {
   leadId: number; customerName: string; pictureUrl: string | null; brand: string; branch: string;
@@ -85,8 +86,9 @@ export default function ChatPage() {
   const [chatSendEnabled, setChatSendEnabled] = useState(true);
   const bottomRef = useRef<HTMLDivElement>(null);
 
+  const [branch, setBranch] = useBranchFilter();
   useEffect(() => {
-    const loadInbox = () => fetch("/api/chat/inbox").then((r) => r.json()).then((d) => {
+    const loadInbox = () => fetch(`/api/chat/inbox${branch ? `?branchId=${branch}` : ""}`).then((r) => r.json()).then((d) => {
       setConversations(d.conversations ?? []);
     }).catch(() => {});
     loadInbox();
@@ -96,7 +98,7 @@ export default function ChatPage() {
     }).catch(() => {});
     const t = setInterval(loadInbox, 5000);
     return () => clearInterval(t);
-  }, []);
+  }, [branch]);
 
   useEffect(() => {
     if (!selectedLeadId) { setMessages(null); return; }
@@ -130,8 +132,9 @@ export default function ChatPage() {
     <div className="h-[calc(100vh-100px)] flex gap-4">
       {/* ── conversation list ── hidden on mobile once a thread is open */}
       <div className={`w-full md:w-[300px] shrink-0 bg-white border border-[var(--border)] rounded-2xl shadow-[var(--shadow)] overflow-hidden flex-col ${selectedLeadId ? "hidden md:flex" : "flex"}`}>
-        <div className="px-4 py-3 border-b border-[var(--border)]">
+        <div className="px-4 py-3 border-b border-[var(--border)] flex items-center gap-2">
           <h1 className="text-[.95rem] font-semibold">แชทลูกค้า</h1>
+          <BranchPicker value={branch} onChange={setBranch} className="ml-auto" />
         </div>
         <div className="flex-1 overflow-y-auto">
           {conversations === null ? (

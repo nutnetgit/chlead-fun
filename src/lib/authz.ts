@@ -156,3 +156,43 @@ export async function branchScopeFor(rq: { funUserId: number | null; role: strin
   const allowed = await managerAllowedBranchIds(rq.funUserId);
   return allowed.length ? allowed : null;
 }
+
+/**
+ * Branch picker (user req 2026-09-09, same rule as CPT's
+ * resolveIssuingBranch): a client-requested `?branchId=` may only NARROW
+ * within the caller's scope — a branch outside it is rejected, never silently
+ * widened or swapped. Returns the effective scope to use in the query.
+ */
+export async function requestedBranchScope(scope: number[] | null, requested: string | null):
+  Promise<{ ok: true; scope: number[] | null } | { ok: false; response: NextResponse }> {
+  if (!requested) return { ok: true, scope };
+  const id = Number(requested);
+  if (!Number.isInteger(id)) return { ok: false, response: NextResponse.json({ error: "bad branchId" }, { status: 400 }) };
+  if (scope === null) {
+    const b = await prisma.branch.findUnique({ where: { branchId: id }, select: { branchId: true } });
+    if (!b) return { ok: false, response: NextResponse.json({ error: "ไม่พบสาขา" }, { status: 404 }) };
+    return { ok: true, scope: [id] };
+  }
+  if (!scope.includes(id)) {
+    audit({ action: "perm.denied", result: "denied", entityType: "branch", entityId: id, detail: "branch outside scope" });
+    return { ok: false, response: NextResponse.json({ error: "ไม่มีสิทธิ์ดูสาขานี้" }, { status: 403 }) };
+  }
+  return { ok: true, scope: [id] };
+}
+
+/**
+ * Branches the user can pick from (header badge + BranchPicker): admin/gm
+ * every active branch; otherwise their links + home branch, falling back to
+ * every active branch when they have none (matches the graceful rule the
+ * list routes already use).
+ */
+export async function visibleBranches(funUserId: number | null, role: string | null): Promise<{ branchId: number; branchName: string; brandName: string | null }[]> {
+  const all = await prisma.branch.findMany({ where: { isActive: 1 }, orderBy: [{ brandId: "asc" }, { branchName: "asc" }] });
+  const brands = await prisma.brand.findMany();
+  const brandName = new Map(brands.map((b) => [b.brandId, b.brandName]));
+  const shape = (b: (typeof all)[number]) => ({ branchId: b.branchId, branchName: b.branchName, brandName: b.brandId ? brandName.get(b.brandId) ?? null : null });
+  if (role === "admin" || role === "gm" || funUserId === null) return all.map(shape);
+  const own = await managerAllowedBranchIds(funUserId);
+  const mine = all.filter((b) => own.includes(b.branchId));
+  return (mine.length ? mine : all).map(shape);
+}

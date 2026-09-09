@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { requirePerm, branchScopeFor } from "@/lib/authz";
+import { requirePerm, branchScopeFor, requestedBranchScope } from "@/lib/authz";
 
 /**
  * Manager dashboard v2 (user req 2026-07-11, brainstormed layout): every
@@ -27,14 +27,18 @@ export async function GET(req: Request) {
   // itself already properly branch-scoped). admin/gm stay global; a manager
   // holding dashboard·viewall is global too; a manager with no branch links
   // falls back to everything (same graceful rule used everywhere else).
-  const branchScope = await branchScopeFor(rq, "dashboard", rq.perms);
+  const sp = new URL(req.url).searchParams;
+  // BranchPicker (?branchId=) may only narrow within that scope.
+  const picked = await requestedBranchScope(await branchScopeFor(rq, "dashboard", rq.perms), sp.get("branchId"));
+  if (!picked.ok) return picked.response;
+  const branchScope = picked.scope;
 
   // Brand filter (user req 2026-07-14, same class of bug as Run Rate's
   // pre-rework "combined" view: a rep who sells more than one brand made the
   // scorecard's bookings/conversion numbers ambiguous mixes across brands).
   // Optional ?brandId= — when set, every lead-derived query below is scoped
   // to it in addition to the branch scope.
-  const brandIdParam = new URL(req.url).searchParams.get("brandId");
+  const brandIdParam = sp.get("brandId");
   const brandFilter = brandIdParam ? Number(brandIdParam) : null;
 
   const leadBranchWhere = {

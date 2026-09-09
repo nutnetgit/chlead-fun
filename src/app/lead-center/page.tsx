@@ -6,6 +6,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { AlertTriangle, ChevronLeft, ChevronRight, ChevronUp, ChevronDown, ChevronsUpDown, Search } from "lucide-react";
 import { ContactPanel } from "@/components/ContactPanel";
+import { BranchPicker, useBranchFilter } from "@/components/BranchPicker";
 
 const PER_PAGE = 20;
 
@@ -88,8 +89,9 @@ export default function LeadCenterPage() {
   // Click a header: 1st = ascending, 2nd = descending, 3rd = back to default.
   const onSort = (k: SortKey) => setSort((s) => s?.key !== k ? { key: k, dir: 1 } : s.dir === 1 ? { key: k, dir: -1 } : null);
 
-  const load = () => { fetch(`/api/leads?filter=${showArchived ? "archived" : "all"}`).then((r) => r.json()).then(setRows); };
-  useEffect(load, [showArchived]);
+  const [branch, setBranch] = useBranchFilter();
+  const load = () => { fetch(`/api/leads?filter=${showArchived ? "archived" : "all"}${branch ? `&branchId=${branch}` : ""}`).then((r) => r.json()).then(setRows); };
+  useEffect(load, [showArchived, branch]);
 
   // Owner cards must reflect whichever brand is currently selected (bug
   // report 2026-07-14: picking a brand chip filtered the table below but the
@@ -134,6 +136,7 @@ export default function LeadCenterPage() {
       <div>
         <div className="flex items-center justify-between gap-3 flex-wrap">
           <h1 className="text-[1.7rem]">ศูนย์รวม Lead</h1>
+          <BranchPicker value={branch} onChange={setBranch} className="ml-auto" />
           <button onClick={() => setShowArchived((v) => !v)}
             className={`text-[.78rem] px-3 py-1.5 rounded-full border font-medium transition ${
               showArchived ? "bg-[var(--amber-soft)] border-[var(--amber)] text-[var(--amber)]" : "bg-white border-[var(--border-2)] text-[var(--text-2)] hover:border-[var(--text-3)]"}`}>

@@ -13,6 +13,7 @@ import { QrLeadModal } from "@/components/QrLeadModal";
 import { KanbanBoard } from "@/components/KanbanBoard";
 import { CalendarModal } from "@/components/CalendarModal";
 import { useMe } from "@/components/Chrome";
+import { BranchPicker, useBranchFilter } from "@/components/BranchPicker";
 import { fmtDate, fmtDayMonth, fmtDateTime } from "@/lib/date";
 
 type LeadRow = {
@@ -91,16 +92,19 @@ export default function LeadsPage() {
   // Signed-in salespeople see only their own pipeline; managers/admin (and
   // auth-disabled mode) see everything.
   const ownerScope = me?.user?.role === "sales" ? `&owner=${me.user.funUserId}` : "";
+  // Branch picker (user req 2026-09-09, CPT parity) — ?branch= in the URL,
+  // re-validated server-side against the caller's scope.
+  const [branch, setBranch] = useBranchFilter();
 
   const loadList = useCallback(() => {
     // Kanban needs every active lead regardless of due-filter.
     const effFilter = view === "kanban" ? "all" : filter;
-    fetch(`/api/leads?filter=${effFilter}${ownerScope}`).then((r) => r.json()).then((data: LeadRow[]) => {
+    fetch(`/api/leads?filter=${effFilter}${ownerScope}${branch ? `&branchId=${branch}` : ""}`).then((r) => r.json()).then((data: LeadRow[]) => {
       setRows(data);
       if (data.length && !data.some((d) => d.leadId === selected)) setSelected(data[0].leadId);
       if (!data.length) { setSelected(null); setDetail(null); }
     });
-  }, [filter, selected]);
+  }, [filter, selected, branch]);
 
   const loadDetail = useCallback((id: number) => {
     fetch(`/api/leads/${id}`).then((r) => r.json()).then(setDetail);
@@ -273,12 +277,13 @@ export default function LeadsPage() {
               ))}
             </div>
           </div>
-          <div className="px-5 py-3 border-b border-[var(--border)]">
-            <div className="relative">
+          <div className="px-5 py-3 border-b border-[var(--border)] flex items-center gap-2">
+            <div className="relative flex-1">
               <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-[var(--text-3)]" />
               <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="ค้นหาชื่อ/สาขา/รุ่นรถ…"
                 className="w-full pl-8 pr-3 py-1.5 text-[.82rem] bg-[var(--bg)] border border-[var(--border-2)] rounded-lg focus:outline-none focus:ring-1 focus:ring-[var(--primary)] focus:bg-white transition" />
             </div>
+            <BranchPicker value={branch} onChange={setBranch} />
           </div>
           {rows === null ? (
             <p className="p-5 text-sm text-[var(--text-2)]">Loading…</p>

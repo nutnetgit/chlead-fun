@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSetting, setSetting, getConversionRateConfig } from "@/lib/settings";
-import { requirePerm, managerAllowedBranchIds } from "@/lib/authz";
+import { requirePerm, managerAllowedBranchIds, requestedBranchScope } from "@/lib/authz";
 import { hasPerm } from "@/lib/menuAccess";
 import { audit } from "@/lib/audit";
 
@@ -79,6 +79,9 @@ export async function GET(request: NextRequest) {
     const allowed = await managerAllowedBranchIds(rq.funUserId!);
     if (allowed.length) branchScope = allowed;
   }
+  const picked = await requestedBranchScope(branchScope, request.nextUrl.searchParams.get("branchId"));
+  if (!picked.ok) return picked.response;
+  branchScope = picked.scope;
   const leadScopeWhere = {
     ...(brandId !== null ? { brandId } : {}),
     ...(branchScope ? { branchId: { in: branchScope } } : {}),
