@@ -98,7 +98,7 @@ export function BranchSwitcher({ me, onSwitched }: { me: Me; onSwitched?: () => 
         <ChevronDown size={11} className={`shrink-0 text-[var(--text-3)] transition ${open ? "rotate-180" : ""}`} />
       </button>
       {open && (
-        <div className="absolute right-0 top-[calc(100%+4px)] z-40 w-64 max-h-80 overflow-y-auto bg-[var(--surface)] border border-[var(--border)] rounded-[14px] shadow-[var(--shadow)] p-1.5">
+        <div className="absolute right-0 top-[calc(100%+4px)] z-40 w-64 bg-[var(--surface)] border border-[var(--border)] rounded-[14px] shadow-[var(--shadow)] p-1.5">
           <div className="px-2.5 pt-1 pb-1 text-[10px] text-[var(--text-3)]">สลับสาขาที่ทำงาน (ค่าตั้งต้นของ Lead/Event ใหม่)</div>
           {branches.map((b) => {
             const on = b.branchId === u.activeBranchId;
