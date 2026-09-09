@@ -1,14 +1,17 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { requireRole, managerAllowedBranchIds } from "@/lib/authz";
+import { requirePerm, managerAllowedBranchIds } from "@/lib/authz";
+import { audit, diffFields } from "@/lib/audit";
+import type { PermFlag } from "@/lib/menuAccess";
 
 type Ctx = { params: Promise<{ id: string }> };
 
 // Branch-scoped write access (user req 2026-07-14, mirrors the events audit):
 // admin/gm touch any team; a manager only teams owned by one of their own
-// branches — a team with no branchId is admin/gm-only.
-async function checkTeamWriteAccess(teamId: number) {
-  const rq = await requireRole(["manager", "gm", "admin"]);
+// branches — a team with no branchId is admin/gm-only. The per-menu flag
+// (edit/del) comes from fun_user_menu (user req 2026-09-09).
+async function checkTeamWriteAccess(teamId: number, flag: PermFlag) {
+  const rq = await requirePerm("settings-teams", flag);
   if (!rq.ok) return { ok: false as const, response: rq.response };
   const team = await prisma.team.findUnique({ where: { teamId } });
   if (!team) return { ok: false as const, response: NextResponse.json({ error: "ไม่พบทีม" }, { status: 404 }) };
@@ -18,14 +21,14 @@ async function checkTeamWriteAccess(teamId: number) {
       return { ok: false as const, response: NextResponse.json({ error: "ทีมนี้ไม่ได้อยู่ในสาขาของคุณ" }, { status: 403 }) };
     }
   }
-  return { ok: true as const, role: rq.role, funUserId: rq.funUserId };
+  return { ok: true as const, role: rq.role, funUserId: rq.funUserId, team };
 }
 
 export async function PUT(request: NextRequest, { params }: Ctx) {
   const { id } = await params;
   const teamId = Number(id);
   if (!Number.isInteger(teamId)) return NextResponse.json({ error: "bad id" }, { status: 400 });
-  const access = await checkTeamWriteAccess(teamId);
+  const access = await checkTeamWriteAccess(teamId, "edit");
   if (!access.ok) return access.response;
 
   const b = (await request.json().catch(() => ({}))) as Record<string, unknown>;
@@ -47,6 +50,7 @@ export async function PUT(request: NextRequest, { params }: Ctx) {
 
   try {
     await prisma.team.update({ where: { teamId }, data });
+    audit({ action: "settings.update", entityType: "team", entityId: teamId, branchId: access.team.branchId, ...diffFields(access.team as unknown as Record<string, unknown>, data) });
     return NextResponse.json({ ok: true });
   } catch {
     return NextResponse.json({ error: "ไม่พบทีม" }, { status: 404 });
@@ -59,12 +63,13 @@ export async function DELETE(_request: NextRequest, { params }: Ctx) {
   const { id } = await params;
   const teamId = Number(id);
   if (!Number.isInteger(teamId)) return NextResponse.json({ error: "bad id" }, { status: 400 });
-  const access = await checkTeamWriteAccess(teamId);
+  const access = await checkTeamWriteAccess(teamId, "del");
   if (!access.ok) return access.response;
 
   const members = await prisma.funUser.count({ where: { teamId } });
   if (members) return NextResponse.json({ error: `ลบไม่ได้ — มีสมาชิกในทีม ${members} คน (ย้ายออกก่อน)` }, { status: 409 });
 
   await prisma.team.delete({ where: { teamId } });
+  audit({ action: "settings.delete", entityType: "team", entityId: teamId, branchId: access.team.branchId, before: { teamName: access.team.teamName } });
   return NextResponse.json({ ok: true });
 }

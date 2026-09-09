@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { requireRole } from "@/lib/authz";
+import { requirePerm } from "@/lib/authz";
+import { audit } from "@/lib/audit";
 
 const VALID_TYPES = new Set(["addon", "reg_insurance"]);
 
@@ -15,7 +16,7 @@ export async function GET() {
 }
 
 export async function POST(request: NextRequest) {
-  const rq = await requireRole(["admin", "gm", "manager"]);
+  const rq = await requirePerm("settings-quotation", "add");
   if (!rq.ok) return rq.response;
 
   const b = (await request.json().catch(() => ({}))) as Record<string, unknown>;
@@ -25,5 +26,6 @@ export async function POST(request: NextRequest) {
   const optionValue = typeof b.optionValue === "number" && Number.isFinite(b.optionValue) ? b.optionValue : null;
 
   const row = await prisma.quoteOption.create({ data: { optionType, optionName, optionValue } });
+  audit({ action: "settings.update", entityType: "quote_option", entityId: row.optionId, after: { optionType, optionName, optionValue }, detail: "create" });
   return NextResponse.json({ ok: true, optionId: row.optionId }, { status: 201 });
 }

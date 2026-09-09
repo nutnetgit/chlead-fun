@@ -20,13 +20,19 @@ export type Me = {
     funUserId: number; displayName: string; nickname: string | null; phone: string | null; role: string;
     approved: boolean; pictureUrl: string | null; branchId: number | null; mustChangePassword: boolean;
     menus?: string[];
+    // Effective 6-flag permissions per menu (src/lib/menuAccess.ts) — drives
+    // button visibility; the server re-checks via requirePerm.
+    perms?: Partial<Record<string, Record<string, boolean>>>;
+    dmsUserId?: number | null;
   };
+  // SPS_SSO_LANDING_URL is set → the "เปิดใบจองใน SPS" button is offered.
+  spsSso?: boolean;
 };
 
 const MeContext = createContext<Me | null>(null);
 export const useMe = () => useContext(MeContext);
 
-const BARE_ROUTES = ["/lead-form", "/login", "/pending", "/liff", "/terms", "/privacy", "/cookies"];
+const BARE_ROUTES = ["/lead-form", "/login", "/pending", "/liff", "/terms", "/privacy", "/cookies", "/sso"];
 
 // Page gate for per-user menu access (user req 2026-07-12): if the signed-in
 // user's effective menus don't include the menu this path belongs to, show a

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { requireRole, managerAllowedBrandIds } from "@/lib/authz";
+import { requirePerm, managerAllowedBrandIds } from "@/lib/authz";
+import { audit } from "@/lib/audit";
 
 type Ctx = { params: Promise<{ id: string }> };
 
@@ -18,7 +19,7 @@ async function assertManagerCanTouch(role: string | null, funUserId: number | nu
 
 // Update model name/code/active.
 export async function PUT(request: NextRequest, { params }: Ctx) {
-  const rq = await requireRole(["admin", "gm", "manager"]);
+  const rq = await requirePerm("settings-models", "edit");
   if (!rq.ok) return rq.response;
 
   const { id } = await params;
@@ -35,6 +36,7 @@ export async function PUT(request: NextRequest, { params }: Ctx) {
   if (!Object.keys(data).length) return NextResponse.json({ error: "nothing to update" }, { status: 400 });
   try {
     await prisma.vehicleModel.update({ where: { modelId }, data });
+    audit({ action: "settings.update", entityType: "model", entityId: modelId, after: data });
     return NextResponse.json({ ok: true });
   } catch {
     return NextResponse.json({ error: "ไม่พบรุ่น" }, { status: 404 });
@@ -44,7 +46,7 @@ export async function PUT(request: NextRequest, { params }: Ctx) {
 // Delete-if-unused (same policy as brand/branch): blocked once any lead
 // references the model; deactivate instead.
 export async function DELETE(_request: NextRequest, { params }: Ctx) {
-  const rq = await requireRole(["admin", "gm", "manager"]);
+  const rq = await requirePerm("settings-models", "del");
   if (!rq.ok) return rq.response;
 
   const { id } = await params;
@@ -61,5 +63,6 @@ export async function DELETE(_request: NextRequest, { params }: Ctx) {
     prisma.vehicleColor.deleteMany({ where: { modelId } }),
     prisma.vehicleModel.delete({ where: { modelId } }),
   ]);
+  audit({ action: "settings.delete", entityType: "model", entityId: modelId });
   return NextResponse.json({ ok: true });
 }

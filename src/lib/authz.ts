@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import { auth, authEnabled } from "@/auth";
 import { prisma } from "@/lib/prisma";
+import { audit } from "@/lib/audit";
+import { hasPerm, resolvePerms, roleDefaultPerms, MENU_LABEL, PERM_FLAG_TH, type MenuKey, type PermFlag, type PermMap } from "@/lib/menuAccess";
 
 /**
  * Server-side role gate for API routes (user req 2026-07-08 — an audit found
@@ -33,9 +35,49 @@ export async function requireRole(allowed: string[]): Promise<RoleCheck> {
     return { ok: false, response: NextResponse.json({ error: "Unauthorized" }, { status: 401 }) };
   }
   if (!allowed.includes(role)) {
+    audit({ action: "perm.denied", result: "denied", detail: `role ${role} not in [${allowed.join(",")}]` });
     return { ok: false, response: NextResponse.json({ error: "Forbidden" }, { status: 403 }) };
   }
   return { ok: true, funUserId, role };
+}
+
+/**
+ * Effective 6-flag permission map for a user (fun_user_menu rows, or the
+ * role's default matrix when the user has none — see menuAccess.ts).
+ */
+export async function loadPerms(funUserId: number, role: string): Promise<PermMap> {
+  const rows = await prisma.userMenu.findMany({ where: { userId: funUserId } });
+  return resolvePerms(role, rows);
+}
+
+/**
+ * Per-menu, per-action gate (user req 2026-09-09 — legacy SPS user_menu
+ * semantics). `flag` omitted = just needs to be able to VIEW the menu.
+ *
+ *   const rq = await requirePerm("leads", "add");
+ *   if (!rq.ok) return rq.response;
+ *   // rq.perms available for further checks (e.g. hasPerm(rq.perms, "leads", "viewall"))
+ *
+ * Admin is never gated (the role that fixes permissions can't lock itself
+ * out). Denials are audited.
+ */
+type PermCheck =
+  | { ok: true; funUserId: number | null; role: string | null; perms: PermMap }
+  | { ok: false; response: NextResponse };
+
+export async function requirePerm(menuKey: MenuKey, flag?: PermFlag): Promise<PermCheck> {
+  const rq = await requireRole(["sales", "manager", "gm", "admin"]);
+  if (!rq.ok) return rq;
+  if (!authEnabled || rq.funUserId === null || rq.role === null) {
+    return { ok: true, funUserId: rq.funUserId, role: rq.role, perms: roleDefaultPerms("admin") };
+  }
+  const perms = rq.role === "admin" ? roleDefaultPerms("admin") : await loadPerms(rq.funUserId, rq.role);
+  if (!hasPerm(perms, menuKey, flag)) {
+    const what = `${MENU_LABEL[menuKey]}${flag ? " · " + PERM_FLAG_TH[flag] : ""}`;
+    audit({ action: "perm.denied", result: "denied", entityType: "menu", entityId: menuKey, detail: what });
+    return { ok: false, response: NextResponse.json({ error: `ไม่มีสิทธิ์: ${what}` }, { status: 403 }) };
+  }
+  return { ok: true, funUserId: rq.funUserId, role: rq.role, perms };
 }
 
 /**
@@ -45,6 +87,9 @@ export async function requireRole(allowed: string[]): Promise<RoleCheck> {
  * so any signed-in sales could read or modify any other salesperson's lead
  * across every brand/branch just by iterating ids). Same rule the chat/quote
  * routes already used: sales only their own leads; manager+ any lead.
+ *
+ * 2026-09-09: a sales user granted `leads.viewall` sees every lead in the
+ * branches they belong to (legacy "เห็นทุกรายการ" semantics), not just their own.
  */
 type LeadAccess =
   | { ok: true; funUserId: number | null; role: string | null; lead: NonNullable<Awaited<ReturnType<typeof prisma.lead.findUnique>>> }
@@ -56,7 +101,12 @@ export async function requireLeadAccess(leadId: bigint): Promise<LeadAccess> {
   const lead = await prisma.lead.findUnique({ where: { leadId } });
   if (!lead) return { ok: false, response: NextResponse.json({ error: "ไม่พบ Lead" }, { status: 404 }) };
   if (rq.role === "sales" && lead.ownerUserId !== rq.funUserId) {
-    return { ok: false, response: NextResponse.json({ error: "Forbidden" }, { status: 403 }) };
+    const perms = await loadPerms(rq.funUserId!, rq.role);
+    const branches = hasPerm(perms, "leads", "viewall") ? await managerAllowedBranchIds(rq.funUserId!) : [];
+    if (!branches.includes(lead.branchId)) {
+      audit({ action: "perm.denied", result: "denied", entityType: "lead", entityId: leadId, detail: "lead of another owner" });
+      return { ok: false, response: NextResponse.json({ error: "Forbidden" }, { status: 403 }) };
+    }
   }
   return { ok: true, funUserId: rq.funUserId, role: rq.role, lead };
 }
@@ -91,4 +141,18 @@ export async function managerAllowedBranchIds(funUserId: number): Promise<number
   const ids = new Set(links.map((l) => l.branchId));
   if (user?.branchId !== null && user?.branchId !== undefined) ids.add(user.branchId);
   return [...ids];
+}
+
+/**
+ * Branch scope for a read (user req 2026-09-09): null = unscoped (gm/admin,
+ * or a manager holding `viewall` on this menu — legacy "เห็นทุกสาขา"); a
+ * number[] = restrict to these branches. Callers keep their existing
+ * `branchScope ? { branchId: { in: branchScope } } : {}` shape.
+ */
+export async function branchScopeFor(rq: { funUserId: number | null; role: string | null }, menuKey: MenuKey, perms?: PermMap): Promise<number[] | null> {
+  if (rq.role !== "manager" || rq.funUserId === null) return null;
+  const p = perms ?? (await loadPerms(rq.funUserId, rq.role));
+  if (hasPerm(p, menuKey, "viewall")) return null;
+  const allowed = await managerAllowedBranchIds(rq.funUserId);
+  return allowed.length ? allowed : null;
 }

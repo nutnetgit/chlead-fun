@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { requireRole } from "@/lib/authz";
+import { requirePerm } from "@/lib/authz";
+import { audit } from "@/lib/audit";
 import { linePushFlex, buildQuotePdfBubble } from "@/lib/flex";
 import { getLineCredsForBrand } from "@/lib/lineConfig";
 
@@ -17,7 +18,7 @@ type Ctx = { params: Promise<{ id: string }> };
  * text summary — fun_chat_message is text-only, not flex-aware).
  */
 export async function POST(_request: NextRequest, { params }: Ctx) {
-  const rq = await requireRole(["sales", "manager", "gm", "admin"]);
+  const rq = await requirePerm("leads", "edit");
   if (!rq.ok) return rq.response;
 
   const { id } = await params;
@@ -69,5 +70,6 @@ export async function POST(_request: NextRequest, { params }: Ctx) {
     }),
     prisma.quotation.update({ where: { quoteId }, data: { status: "sent", sentAt: new Date() } }),
   ]);
+  audit({ action: "quote.send", entityType: "quote", entityId: quoteId, branchId: lead.branchId, detail: `${quoteNo} → LINE, lead #${lead.leadId}` });
   return NextResponse.json({ ok: true });
 }

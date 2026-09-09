@@ -19,6 +19,10 @@ const PUBLIC_PREFIXES = [
   "/terms", "/privacy", "/cookies", // legal pages — must be readable pre-login
   "/api/auth", "/api/public", "/api/webhooks", "/api/jobs",
   "/api/models", "/api/brands",
+  // SSO with SPS (sql/034): /sso lands an SPS-issued ticket (no session yet);
+  // /api/sso/verify + /api/sso/issue are server-to-server, gated by
+  // X-Api-Token inside the route, not by a browser session.
+  "/sso", "/api/sso/verify", "/api/sso/issue",
   "/_next", "/favicon",
 ];
 

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { requireRole, managerAllowedBranchIds } from "@/lib/authz";
+import { requireRole, requirePerm, managerAllowedBranchIds } from "@/lib/authz";
+import { audit } from "@/lib/audit";
 
 // Events (manager-configured, stored in fun_campaign + junctions).
 // ?active=1 → only events running today (for the sales QR picker).
@@ -89,7 +90,7 @@ export function sumBrandTargets(brands: { brandId?: unknown; targetLeads?: unkno
 }
 
 export async function POST(request: NextRequest) {
-  const rq = await requireRole(["manager", "gm", "admin"]);
+  const rq = await requirePerm("events", "add");
   if (!rq.ok) return rq.response;
 
   const b = (await request.json().catch(() => ({}))) as Record<string, unknown>;
@@ -134,5 +135,6 @@ export async function POST(request: NextRequest) {
   }));
   if (targetRows.length) await prisma.campaignTarget.createMany({ data: targetRows });
 
+  audit({ action: "event.create", entityType: "event", entityId: ev.campaignId, branchId, after: { eventName: name, startDate: b.startDate, endDate: b.endDate, targetLeads: derivedTargetLeads, brands: brands.length, targets: targetRows.length } });
   return NextResponse.json({ ok: true, eventId: ev.campaignId }, { status: 201 });
 }

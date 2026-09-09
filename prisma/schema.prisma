@@ -261,13 +261,83 @@ model FunUser {
   mustChangePassword Int       @default(0) @map("must_change_password") @db.TinyInt
   failedLoginCount   Int       @default(0) @map("failed_login_count")
   lockedUntil        DateTime? @map("locked_until")
-  // Per-user menu access overrides (user req 2026-07-12) — NULL = role
-  // defaults; JSON {"menuKey": bool} otherwise. See src/lib/menuAccess.ts.
+  // Legacy per-user menu overrides (2026-07-12 → superseded by fun_user_menu
+  // in sql/032). Only read by the one-time migration; NULL after it runs.
   menuAccess         String?   @map("menu_access") @db.Text
+  // SPS `user.u_id` this account maps to (sql/032) — permission export/import
+  // and SSO identity fallback when LINE userId isn't known on one side.
+  dmsUserId          Int?      @map("dms_user_id")
   branchLinks UserBranch[]
+  menuRows    UserMenu[]
 
   @@unique([username], map: "uk_user_username")
+  @@unique([dmsUserId], map: "uk_user_dms")
   @@map("fun_user")
+}
+
+// Per-user × per-menu permission flags (sql/032) — legacy SPS user_menu shape.
+// Row exists = can view. No rows for a user = role defaults (menuAccess.ts).
+model UserMenu {
+  userId     Int       @map("user_id")
+  menuKey    String    @map("menu_key") @db.VarChar(40)
+  canAdd     Int       @default(0) @map("can_add") @db.TinyInt
+  canEdit    Int       @default(0) @map("can_edit") @db.TinyInt
+  canCancel  Int       @default(0) @map("can_cancel") @db.TinyInt
+  canDel     Int       @default(0) @map("can_del") @db.TinyInt
+  canReport  Int       @default(0) @map("can_report") @db.TinyInt
+  canViewall Int       @default(0) @map("can_viewall") @db.TinyInt
+  updatedBy  Int?      @map("updated_by")
+  updatedAt  DateTime? @map("updated_at")
+
+  user FunUser @relation(fields: [userId], references: [userId])
+
+  @@id([userId, menuKey])
+  @@map("fun_user_menu")
+}
+
+// Application audit log (sql/033) — written by src/lib/audit.ts only.
+model AuditLog {
+  auditId     BigInt   @id @default(autoincrement()) @map("audit_id")
+  at          DateTime @default(now()) @db.DateTime(3)
+  actorUserId Int?     @map("actor_user_id")
+  actorName   String?  @map("actor_name") @db.VarChar(100)
+  actorRole   String?  @map("actor_role") @db.VarChar(20)
+  source      String   @default("web") @db.VarChar(10)
+  action      String   @db.VarChar(50)
+  entityType  String?  @map("entity_type") @db.VarChar(30)
+  entityId    String?  @map("entity_id") @db.VarChar(40)
+  branchId    Int?     @map("branch_id")
+  ip          String?  @db.VarChar(45)
+  userAgent   String?  @map("user_agent") @db.VarChar(255)
+  requestId   String?  @map("request_id") @db.Char(36)
+  beforeJson  String?  @map("before_json") @db.Text
+  afterJson   String?  @map("after_json") @db.Text
+  result      String   @default("ok") @db.VarChar(10)
+  detail      String?  @db.VarChar(500)
+
+  @@index([at], map: "idx_audit_at")
+  @@index([actorUserId, at], map: "idx_audit_actor")
+  @@index([entityType, entityId], map: "idx_audit_entity")
+  @@index([action, at], map: "idx_audit_action")
+  @@map("fun_audit_log")
+}
+
+// Single-use SSO tickets (sql/034) — see src/lib/sso.ts.
+model SsoTicket {
+  ticketHash String    @id @map("ticket_hash") @db.Char(64)
+  direction  String    @db.VarChar(3)
+  userId     Int       @map("user_id")
+  leadId     BigInt?   @map("lead_id")
+  handoffId  BigInt?   @map("handoff_id")
+  target     String?   @db.VarChar(100)
+  issuedAt   DateTime  @default(now()) @map("issued_at") @db.DateTime(3)
+  expiresAt  DateTime  @map("expires_at") @db.DateTime(3)
+  consumedAt DateTime? @map("consumed_at") @db.DateTime(3)
+  consumerIp String?   @map("consumer_ip") @db.VarChar(45)
+  requestId  String?   @map("request_id") @db.Char(36)
+
+  @@index([userId, issuedAt], map: "idx_sso_user")
+  @@map("fun_sso_ticket")
 }
 
 model Team {

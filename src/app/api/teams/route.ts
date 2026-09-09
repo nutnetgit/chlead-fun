@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { requireRole, managerAllowedBranchIds } from "@/lib/authz";
+import { requireRole, requirePerm, managerAllowedBranchIds } from "@/lib/authz";
+import { audit } from "@/lib/audit";
 
 // Team directory (fun_team) with live member counts (FunUser.teamId).
 // Team + FunUser.teamId already existed in the schema from the original bulk
@@ -44,7 +45,7 @@ export async function GET() {
 
 // Create team. Body: { teamName, branchId?, managerUserId? }
 export async function POST(request: NextRequest) {
-  const rq = await requireRole(["admin", "gm", "manager"]);
+  const rq = await requirePerm("settings-teams", "add");
   if (!rq.ok) return rq.response;
 
   const b = (await request.json().catch(() => ({}))) as Record<string, unknown>;
@@ -64,5 +65,6 @@ export async function POST(request: NextRequest) {
   const team = await prisma.team.create({
     data: { teamName, branchId, managerUserId: typeof b.managerUserId === "number" ? b.managerUserId : null },
   });
+  audit({ action: "settings.update", entityType: "team", entityId: team.teamId, branchId, after: { teamName, branchId, managerUserId: team.managerUserId }, detail: "create" });
   return NextResponse.json({ ok: true, teamId: team.teamId }, { status: 201 });
 }

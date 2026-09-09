@@ -1,11 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { requireRole } from "@/lib/authz";
+import { requirePerm } from "@/lib/authz";
+import { audit, diffFields } from "@/lib/audit";
 
 type Ctx = { params: Promise<{ id: string }> };
 
 export async function PUT(request: NextRequest, { params }: Ctx) {
-  const rq = await requireRole(["admin", "gm"]);
+  const rq = await requirePerm("settings", "edit");
   if (!rq.ok) return rq.response;
 
   const { id } = await params;
@@ -21,7 +22,9 @@ export async function PUT(request: NextRequest, { params }: Ctx) {
   if (Object.keys(data).length === 0) return NextResponse.json({ error: "nothing to update" }, { status: 400 });
 
   try {
+    const before = await prisma.sourceChannel.findUnique({ where: { channelId } });
     await prisma.sourceChannel.update({ where: { channelId }, data });
+    audit({ action: "settings.update", entityType: "source", entityId: channelId, ...diffFields(before as unknown as Record<string, unknown>, data) });
     return NextResponse.json({ ok: true });
   } catch {
     return NextResponse.json({ error: "ไม่พบแหล่งที่มา" }, { status: 404 });
@@ -31,7 +34,7 @@ export async function PUT(request: NextRequest, { params }: Ctx) {
 // Delete-if-unused policy (same convention as brand/branch/model — user
 // decision 2026-07-07): any lead referencing this source blocks the delete.
 export async function DELETE(_request: NextRequest, { params }: Ctx) {
-  const rq = await requireRole(["admin", "gm"]);
+  const rq = await requirePerm("settings", "del");
   if (!rq.ok) return rq.response;
 
   const { id } = await params;
@@ -41,6 +44,7 @@ export async function DELETE(_request: NextRequest, { params }: Ctx) {
   const leads = await prisma.lead.count({ where: { channelId } });
   if (leads) return NextResponse.json({ error: `ลบไม่ได้ — มี Lead ใช้แหล่งที่มานี้อยู่ ${leads} ราย` }, { status: 409 });
 
-  await prisma.sourceChannel.delete({ where: { channelId } });
+  const row = await prisma.sourceChannel.delete({ where: { channelId } });
+  audit({ action: "settings.delete", entityType: "source", entityId: channelId, before: { channelName: row.channelName, category: row.category } });
   return NextResponse.json({ ok: true });
 }

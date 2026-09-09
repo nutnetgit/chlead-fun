@@ -1,15 +1,18 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { requireRole, managerAllowedBranchIds } from "@/lib/authz";
+import { requirePerm, managerAllowedBranchIds } from "@/lib/authz";
+import { audit } from "@/lib/audit";
+import type { PermFlag } from "@/lib/menuAccess";
 import { sumBrandTargets } from "@/app/api/events/route";
 
 type Ctx = { params: Promise<{ id: string }> };
 
 // Branch-scoped write access (user req 2026-07-13, mirrors POST /api/events):
 // admin/gm touch anything; a manager only events owned by one of their own
-// branches — central events (branchId null) are admin/gm-only.
-async function checkEventWriteAccess(campaignId: number) {
-  const rq = await requireRole(["manager", "gm", "admin"]);
+// branches — central events (branchId null) are admin/gm-only. The per-menu
+// flag (edit/del) comes from fun_user_menu (user req 2026-09-09).
+async function checkEventWriteAccess(campaignId: number, flag: PermFlag) {
+  const rq = await requirePerm("events", flag);
   if (!rq.ok) return { ok: false as const, response: rq.response };
   const event = await prisma.campaign.findUnique({ where: { campaignId } });
   if (!event) return { ok: false as const, response: NextResponse.json({ error: "ไม่พบ event" }, { status: 404 }) };
@@ -27,7 +30,7 @@ export async function PUT(request: NextRequest, { params }: Ctx) {
   const { id } = await params;
   const campaignId = Number(id);
   if (!Number.isInteger(campaignId)) return NextResponse.json({ error: "bad id" }, { status: 400 });
-  const access = await checkEventWriteAccess(campaignId);
+  const access = await checkEventWriteAccess(campaignId, "edit");
   if (!access.ok) return access.response;
   const b = (await request.json().catch(() => ({}))) as Record<string, unknown>;
 
@@ -77,6 +80,7 @@ export async function PUT(request: NextRequest, { params }: Ctx) {
         ...(rows.length ? [prisma.campaignTarget.createMany({ data: rows })] : []),
       ]);
     }
+    audit({ action: "event.update", entityType: "event", entityId: campaignId, after: { ...data, ...(brands ? { brands: brands.length } : {}), ...(Array.isArray(b.targets) ? { targets: (b.targets as unknown[]).length } : {}) } });
     return NextResponse.json({ ok: true });
   } catch {
     return NextResponse.json({ error: "ไม่พบ event" }, { status: 404 });
@@ -88,7 +92,7 @@ export async function DELETE(_request: NextRequest, { params }: Ctx) {
   const { id } = await params;
   const campaignId = Number(id);
   if (!Number.isInteger(campaignId)) return NextResponse.json({ error: "bad id" }, { status: 400 });
-  const access = await checkEventWriteAccess(campaignId);
+  const access = await checkEventWriteAccess(campaignId, "del");
   if (!access.ok) return access.response;
   const leads = await prisma.lead.count({ where: { campaignId } });
   if (leads) return NextResponse.json({ error: `ลบไม่ได้ — มี Lead จาก event นี้ ${leads} ราย` }, { status: 409 });
@@ -97,5 +101,6 @@ export async function DELETE(_request: NextRequest, { params }: Ctx) {
     prisma.campaignTarget.deleteMany({ where: { campaignId } }),
     prisma.campaign.delete({ where: { campaignId } }),
   ]);
+  audit({ action: "event.delete", entityType: "event", entityId: campaignId });
   return NextResponse.json({ ok: true });
 }

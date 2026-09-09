@@ -432,12 +432,24 @@ export default function LeadsPage() {
                     ตั้งเป็น {t.toUpperCase()}
                   </button>
                 ))}
-                {/* จอง (user req 2026-07-14): placeholder for now — just
-                    flips stage to "booking", same as dragging the card to
-                    the จองแล้ว kanban column. Once SPS integration lands,
-                    this button becomes "เพิ่ม booking ใน SPS" (opens SPS in
-                    a new tab, pre-filled with name/phone, user finishes the
-                    rest there) — deliberately NOT built yet, waiting on SPS. */}
+                {/* จอง (user req 2026-07-14): flips stage to "booking", same as
+                    dragging the card to the จองแล้ว kanban column. Once booked
+                    and SPS SSO is configured (SPS_SSO_LANDING_URL), the
+                    "เปิดใบจองใน SPS" button below hands the lead to SPS's
+                    booking form without a second login (user req 2026-09-09,
+                    /api/sso/handoff → docs/SPS_INTEGRATION.md). */}
+                {detail.stage === "booking" && me?.spsSso && (
+                  <button
+                    onClick={async () => {
+                      const res = await fetch("/api/sso/handoff", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ leadId: detail.leadId }) });
+                      const d = await res.json().catch(() => ({}));
+                      if (!res.ok || !d.redirectUrl) { alert(d.error ?? "ส่งต่อไป SPS ไม่สำเร็จ"); return; }
+                      window.open(d.redirectUrl, "_blank", "noopener");
+                    }}
+                    className="px-4 py-2 rounded-[9px] text-[.8rem] font-medium bg-[var(--green)] text-white hover:brightness-95 transition">
+                    🚗 เปิดใบจองใน SPS
+                  </button>
+                )}
                 {detail.stage !== "booking" && detail.stage !== "lost" && detail.stage !== "forfeited" && (
                   <button
                     onClick={async () => {

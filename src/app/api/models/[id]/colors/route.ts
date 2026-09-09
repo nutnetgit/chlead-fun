@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { requireRole, managerAllowedBrandIds } from "@/lib/authz";
+import { requirePerm, managerAllowedBrandIds } from "@/lib/authz";
+import { audit } from "@/lib/audit";
 
 type Ctx = { params: Promise<{ id: string }> };
 
@@ -8,7 +9,7 @@ type Ctx = { params: Promise<{ id: string }> };
 // reactivates it (unique key on model+name). Manager settings split (user
 // req 2026-07-12): scoped to brands the manager has branch access to.
 export async function POST(request: NextRequest, { params }: Ctx) {
-  const rq = await requireRole(["admin", "gm", "manager"]);
+  const rq = await requirePerm("settings-models", "add");
   if (!rq.ok) return rq.response;
 
   const { id } = await params;
@@ -32,5 +33,6 @@ export async function POST(request: NextRequest, { params }: Ctx) {
     return NextResponse.json({ ok: true, colorId: existing.colorId });
   }
   const row = await prisma.vehicleColor.create({ data: { modelId, colorName } });
+  audit({ action: "settings.update", entityType: "color", entityId: row.colorId, after: { modelId, colorName }, detail: "create" });
   return NextResponse.json({ ok: true, colorId: row.colorId }, { status: 201 });
 }

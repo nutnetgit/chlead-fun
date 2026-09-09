@@ -3,11 +3,26 @@ import bcrypt from "bcryptjs";
 import { prisma } from "@/lib/prisma";
 import { genTempPassword } from "@/lib/password";
 import { requireRole, managerAllowedBranchIds } from "@/lib/authz";
-import { MENU_DEFS } from "@/lib/menuAccess";
+import { audit, diffFields } from "@/lib/audit";
+import { isMenuKey, permsToRows, resolvePerms, PERM_FLAGS, type PermMap, type PermFlags } from "@/lib/menuAccess";
 
 type Ctx = { params: Promise<{ id: string }> };
 const VALID_ROLES = new Set(["sales", "manager", "gm", "admin"]);
-const VALID_MENU_KEYS = new Set(MENU_DEFS.map((m) => m.key as string));
+
+// Body.perms → validated PermMap (unknown keys/flags dropped). Returns
+// undefined when the field wasn't sent, null for "reset to role defaults".
+function parsePerms(raw: unknown): PermMap | null | undefined {
+  if (raw === undefined) return undefined;
+  if (raw === null) return null;
+  if (typeof raw !== "object" || Array.isArray(raw)) return undefined;
+  const out: PermMap = {};
+  for (const [k, v] of Object.entries(raw as Record<string, unknown>)) {
+    if (!isMenuKey(k) || !v || typeof v !== "object") continue;
+    const flags = v as Record<string, unknown>;
+    out[k] = Object.fromEntries(PERM_FLAGS.map((f) => [f, flags[f] === true])) as PermFlags;
+  }
+  return out;
+}
 
 // Update user fields and (when branchIds is sent) replace branch access.
 // { resetPassword: true } issues a fresh temp password (admin never sees the
@@ -43,9 +58,13 @@ export async function PUT(request: NextRequest, { params }: Ctx) {
     }
     if (typeof b.teamId === "number" || b.teamId === null) {
       await prisma.funUser.update({ where: { userId }, data: { teamId: b.teamId } });
+      audit({ action: "user.update", entityType: "user", entityId: userId, before: { teamId: target.teamId }, after: { teamId: b.teamId } });
     }
     return NextResponse.json({ ok: true });
   }
+
+  const current = await prisma.funUser.findUnique({ where: { userId }, include: { menuRows: true } });
+  if (!current) return NextResponse.json({ error: "ไม่พบผู้ใช้" }, { status: 404 });
 
   const data: Record<string, unknown> = {};
   if (typeof b.displayName === "string" && b.displayName.trim()) data.displayName = b.displayName.trim();
@@ -56,25 +75,21 @@ export async function PUT(request: NextRequest, { params }: Ctx) {
   if (typeof b.teamId === "number" || b.teamId === null) data.teamId = b.teamId;
   if (typeof b.lineUserid === "string") data.lineUserid = b.lineUserid.trim() || null;
   if (typeof b.username === "string") data.username = b.username.trim() || null;
+  if (Number.isInteger(b.dmsUserId) || b.dmsUserId === null) data.dmsUserId = b.dmsUserId;
   if (typeof b.isActive === "boolean") data.isActive = b.isActive ? 1 : 0;
   // Approval (LINE-registration flow): admin flips this once role/branches are set.
   if (b.approve === true) data.approvedAt = new Date();
 
-  // Per-user menu access (user req 2026-07-12): object of {menuKey: bool}
-  // overrides, or null to reset to role defaults. Unknown keys dropped.
-  if (b.menuAccess === null) data.menuAccess = null;
-  else if (typeof b.menuAccess === "object" && b.menuAccess && !Array.isArray(b.menuAccess)) {
-    const clean = Object.fromEntries(
-      Object.entries(b.menuAccess as Record<string, unknown>)
-        .filter(([k, v]) => VALID_MENU_KEYS.has(k) && typeof v === "boolean"),
-    );
-    // Lockout guard: an admin editing THEIR OWN account can't switch off
-    // the settings menu — nobody should be able to strand themselves out
-    // of the page that undoes the change.
-    if (userId === rq.funUserId && clean.settings === false) {
+  // Per-user permissions (user req 2026-09-09, sql/032): full PermMap →
+  // replace rows; null → delete rows (back to role defaults).
+  const perms = parsePerms(b.perms);
+  if (perms !== undefined) {
+    // Lockout guard: an admin editing THEIR OWN account can't drop the
+    // settings menu — nobody should be able to strand themselves out of the
+    // page that undoes the change.
+    if (userId === rq.funUserId && perms !== null && !perms.settings) {
       return NextResponse.json({ error: "ปิดเมนูตั้งค่าของบัญชีตัวเองไม่ได้ — กันล็อกตัวเองออกจากระบบตั้งค่า" }, { status: 400 });
     }
-    data.menuAccess = JSON.stringify(clean);
   }
 
   let tempPassword: string | undefined;
@@ -94,10 +109,32 @@ export async function PUT(request: NextRequest, { params }: Ctx) {
         prisma.userBranch.deleteMany({ where: { userId } }),
         ...(branchIds.length ? [prisma.userBranch.createMany({ data: branchIds.map((branchId) => ({ userId, branchId })) })] : []),
       ]);
+      data.branchIds = branchIds;
+    }
+    if (perms !== undefined) {
+      const rows = perms ? permsToRows(perms) : [];
+      await prisma.$transaction([
+        prisma.userMenu.deleteMany({ where: { userId } }),
+        ...(rows.length ? [prisma.userMenu.createMany({ data: rows.map((r) => ({ userId, ...r, updatedBy: rq.funUserId, updatedAt: new Date() })) })] : []),
+        // Any pre-032 JSON overrides are superseded the moment rows are managed here.
+        prisma.funUser.update({ where: { userId }, data: { menuAccess: null } }),
+      ]);
+      audit({
+        action: "user.perm_change", entityType: "user", entityId: userId,
+        before: current.menuRows.length ? resolvePerms(current.role, current.menuRows) : { roleDefault: current.role },
+        after: perms ?? { roleDefault: (data.role as string) ?? current.role },
+      });
+    }
+    if (Object.keys(data).length) {
+      const { before, after } = diffFields(current as unknown as Record<string, unknown>, data);
+      audit({ action: b.resetPassword === true ? "user.password_reset" : (b.approve === true ? "user.approve" : "user.update"), entityType: "user", entityId: userId, before, after });
     }
     return NextResponse.json({ ok: true, tempPassword });
   } catch (e) {
-    const msg = String(e).includes("uk_user_username") ? "ชื่อผู้ใช้นี้ถูกใช้แล้ว" : "ไม่พบผู้ใช้";
+    const s = String(e);
+    const msg = s.includes("uk_user_username") ? "ชื่อผู้ใช้นี้ถูกใช้แล้ว"
+      : s.includes("uk_user_dms") ? "รหัสผู้ใช้ SPS นี้ถูกผูกกับบัญชีอื่นแล้ว"
+      : "ไม่พบผู้ใช้";
     return NextResponse.json({ error: msg }, { status: 409 });
   }
 }

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { requireRole } from "@/lib/authz";
+import { requirePerm } from "@/lib/authz";
+import { audit } from "@/lib/audit";
 
 // Brand master — new brands can be added when the group signs a new marque,
 // then showrooms get assigned to it in /settings/branches. `liffId` is
@@ -14,7 +15,7 @@ export async function GET() {
 }
 
 export async function POST(request: NextRequest) {
-  const rq = await requireRole(["admin", "gm"]);
+  const rq = await requirePerm("settings", "add");
   if (!rq.ok) return rq.response;
 
   const b = (await request.json().catch(() => ({}))) as { brandName?: string };
@@ -22,6 +23,7 @@ export async function POST(request: NextRequest) {
   if (!name) return NextResponse.json({ error: "missing brandName" }, { status: 400 });
   try {
     const row = await prisma.brand.create({ data: { brandName: name } });
+    audit({ action: "settings.update", entityType: "brand", entityId: row.brandId, after: { brandName: name }, detail: "create" });
     return NextResponse.json({ ok: true, brandId: row.brandId }, { status: 201 });
   } catch {
     return NextResponse.json({ error: "มีแบรนด์ชื่อนี้อยู่แล้ว" }, { status: 409 });

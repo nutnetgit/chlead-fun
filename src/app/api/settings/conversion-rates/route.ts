@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { setSetting, getConversionRateConfig, type ConversionRateConfig } from "@/lib/settings";
-import { requireRole } from "@/lib/authz";
+import { requirePerm } from "@/lib/authz";
+import { audit, diffFields } from "@/lib/audit";
 
 /**
  * Weighted Pipeline / Lead Aging assumptions (user req 2026-07-11) — the
@@ -18,7 +19,7 @@ export async function GET() {
 }
 
 export async function PUT(request: NextRequest) {
-  const rq = await requireRole(["admin", "gm", "manager"]);
+  const rq = await requirePerm("settings-conversion-rate", "edit");
   if (!rq.ok) return rq.response;
 
   const b = (await request.json().catch(() => ({}))) as Partial<ConversionRateConfig>;
@@ -32,5 +33,6 @@ export async function PUT(request: NextRequest) {
     leadsPerBooking: typeof b.leadsPerBooking === "number" && b.leadsPerBooking > 0 ? Math.round(b.leadsPerBooking * 10) / 10 : current.leadsPerBooking,
   };
   await setSetting("conversionRates", next);
+  audit({ action: "settings.update", entityType: "conversion_rates", ...diffFields(current as unknown as Record<string, unknown>, next) });
   return NextResponse.json({ ok: true, config: next });
 }

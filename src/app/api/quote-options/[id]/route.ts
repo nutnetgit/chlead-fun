@@ -1,11 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { requireRole } from "@/lib/authz";
+import { requirePerm } from "@/lib/authz";
+import { audit } from "@/lib/audit";
 
 type Ctx = { params: Promise<{ id: string }> };
 
 export async function PUT(request: NextRequest, { params }: Ctx) {
-  const rq = await requireRole(["admin", "gm", "manager"]);
+  const rq = await requirePerm("settings-quotation", "edit");
   if (!rq.ok) return rq.response;
 
   const { id } = await params;
@@ -21,6 +22,7 @@ export async function PUT(request: NextRequest, { params }: Ctx) {
 
   try {
     await prisma.quoteOption.update({ where: { optionId }, data });
+    audit({ action: "settings.update", entityType: "quote_option", entityId: optionId, after: data });
     return NextResponse.json({ ok: true });
   } catch {
     return NextResponse.json({ error: "ไม่พบรายการ" }, { status: 404 });
@@ -29,7 +31,7 @@ export async function PUT(request: NextRequest, { params }: Ctx) {
 
 // No FK dependents yet (quotation module itself isn't built) — always deletable.
 export async function DELETE(_request: NextRequest, { params }: Ctx) {
-  const rq = await requireRole(["admin", "gm", "manager"]);
+  const rq = await requirePerm("settings-quotation", "del");
   if (!rq.ok) return rq.response;
 
   const { id } = await params;
@@ -37,5 +39,6 @@ export async function DELETE(_request: NextRequest, { params }: Ctx) {
   if (!Number.isInteger(optionId)) return NextResponse.json({ error: "bad id" }, { status: 400 });
 
   await prisma.quoteOption.delete({ where: { optionId } }).catch(() => {});
+  audit({ action: "settings.delete", entityType: "quote_option", entityId: optionId });
   return NextResponse.json({ ok: true });
 }

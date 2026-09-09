@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { requireRole } from "@/lib/authz";
+import { requirePerm } from "@/lib/authz";
+import { audit } from "@/lib/audit";
 
 const VALID_CATEGORIES = new Set([
   "walkin", "phone", "online_owned", "online_paid", "oem", "event", "referral", "service", "fleet", "unknown",
@@ -19,7 +20,7 @@ export async function GET() {
 }
 
 export async function POST(request: NextRequest) {
-  const rq = await requireRole(["admin", "gm"]);
+  const rq = await requirePerm("settings", "add");
   if (!rq.ok) return rq.response;
 
   const b = (await request.json().catch(() => ({}))) as Record<string, unknown>;
@@ -30,5 +31,6 @@ export async function POST(request: NextRequest) {
   const budget = typeof b.budget === "number" && Number.isFinite(b.budget) ? b.budget : null;
 
   const row = await prisma.sourceChannel.create({ data: { channelName, category: category as never, responsiblePerson, budget } });
+  audit({ action: "settings.update", entityType: "source", entityId: row.channelId, after: { channelName, category, responsiblePerson, budget }, detail: "create" });
   return NextResponse.json({ ok: true, channelId: row.channelId }, { status: 201 });
 }

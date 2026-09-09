@@ -3,20 +3,23 @@ import Line from "next-auth/providers/line";
 import Credentials from "next-auth/providers/credentials";
 import bcrypt from "bcryptjs";
 import { prisma } from "@/lib/prisma";
+import { audit } from "@/lib/audit";
+import { consumeTicket } from "@/lib/sso";
 
-// Two ways in (user request 2026-07-08): LINE Login (self-service registration,
-// admin approves) AND username+password (for staff without/who don't want to
-// use personal LINE, or as a LINE-outage fallback). Both land on the same
-// fun_user row and the same approval/role gate — a username+password account
-// still needs approvedAt set before it can do anything but see /pending.
-//  - LINE: first sign-in auto-creates a PENDING fun_user; bootstrap admin if
-//    none exists yet.
-//  - Credentials: an admin creates the username + issues a temp password in
-//    /settings/users (mustChangePassword=1 until the user sets their own).
+// Three ways in:
+//  - LINE Login (user request 2026-07-08): self-service registration, admin
+//    approves. First sign-in auto-creates a PENDING fun_user; bootstrap
+//    admin if none exists yet.
+//  - username+password: for staff without/who don't want to use personal
+//    LINE, or as a LINE-outage fallback. Admin creates the username + issues
+//    a temp password in /settings/users (mustChangePassword=1 until changed).
+//  - SSO ticket from SPS (user req 2026-09-09, provider id "sso"): the DMS
+//    calls POST /api/sso/issue, the browser lands on /sso?ticket=…, and the
+//    ticket is consumed here exactly once. See src/lib/sso.ts.
+// All land on the same fun_user row and the same approval/role gate.
 // Auth is DISABLED entirely (middleware passes everything) until
 // AUTH_LINE_ID/AUTH_LINE_SECRET are set — prevents locking ourselves out
-// before the LINE Login channel exists. Credentials login only matters once
-// auth is enabled anyway (same gate).
+// before the LINE Login channel exists.
 export const authEnabled = !!process.env.AUTH_LINE_ID && !!process.env.AUTH_LINE_SECRET;
 
 export const { handlers, auth, signIn, signOut } = NextAuth({
@@ -33,9 +36,14 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         const password = String(creds?.password ?? "");
         if (!username || !password) return null;
         const user = await prisma.funUser.findFirst({ where: { username } });
-        if (!user || !user.passwordHash || user.isActive !== 1) return null;
+        const fail = (reason: string) => {
+          audit({ action: "auth.login_failed", result: "denied", entityType: "user", entityId: user?.userId ?? null,
+            actor: { userId: user?.userId ?? null, name: username, role: user?.role ?? null }, detail: reason });
+          return null;
+        };
+        if (!user || !user.passwordHash || user.isActive !== 1) return fail(!user ? "unknown username" : !user.passwordHash ? "no password set" : "inactive");
         // Brute-force lockout: refuse while locked, even with the right password.
-        if (user.lockedUntil && user.lockedUntil > new Date()) return null;
+        if (user.lockedUntil && user.lockedUntil > new Date()) return fail("locked");
         const ok = await bcrypt.compare(password, user.passwordHash);
         if (!ok) {
           const count = user.failedLoginCount + 1;
@@ -45,7 +53,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
               ? { failedLoginCount: 0, lockedUntil: new Date(Date.now() + 15 * 60_000) }
               : { failedLoginCount: count },
           });
-          return null;
+          return fail(count >= 5 ? "wrong password → locked 15 min" : `wrong password (${count}/5)`);
         }
         if (user.failedLoginCount || user.lockedUntil) {
           await prisma.funUser.update({ where: { userId: user.userId }, data: { failedLoginCount: 0, lockedUntil: null } });
@@ -53,12 +61,47 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         return { id: String(user.userId), name: user.displayName };
       },
     }),
+    Credentials({
+      id: "sso",
+      name: "SPS SSO",
+      credentials: { ticket: {} },
+      authorize: async (creds) => {
+        const ticket = String(creds?.ticket ?? "");
+        const r = await consumeTicket(ticket, "in", null);
+        if (!r.ok) {
+          audit({ action: "auth.sso_consume", result: "denied", source: "sso", actor: null, detail: r.code });
+          return null;
+        }
+        const user = await prisma.funUser.findUnique({ where: { userId: r.row.userId } });
+        if (!user || user.isActive !== 1 || !user.approvedAt) {
+          audit({ action: "auth.sso_consume", result: "denied", source: "sso", actor: { userId: r.row.userId }, detail: "user inactive/unapproved" });
+          return null;
+        }
+        audit({ action: "auth.sso_consume", source: "sso", actor: { userId: user.userId, name: user.displayName, role: user.role }, entityType: "user", entityId: user.userId, detail: r.row.target ?? "/" });
+        return { id: String(user.userId), name: user.displayName };
+      },
+    }),
   ],
   session: { strategy: "jwt" },
   pages: { signIn: "/login" },
+  events: {
+    async signIn({ user, account }) {
+      const fu = account?.provider === "line"
+        ? await prisma.funUser.findFirst({ where: { lineUserid: account.providerAccountId } })
+        : user.id ? await prisma.funUser.findUnique({ where: { userId: Number(user.id) } }) : null;
+      audit({ action: "auth.login", entityType: "user", entityId: fu?.userId ?? null,
+        actor: { userId: fu?.userId ?? null, name: fu?.displayName ?? user.name ?? null, role: fu?.role ?? null },
+        detail: `provider=${account?.provider ?? "?"}` });
+    },
+    async signOut(message) {
+      const token = "token" in message ? (message.token as Record<string, unknown> | null) : null;
+      const userId = typeof token?.funUserId === "number" ? token.funUserId : null;
+      audit({ action: "auth.logout", entityType: "user", entityId: userId, actor: { userId, name: typeof token?.name === "string" ? token.name : null, role: typeof token?.role === "string" ? token.role : null } });
+    },
+  },
   callbacks: {
     async signIn({ user, account }) {
-      if (account?.provider === "credentials") return true; // gated inside authorize()
+      if (account?.provider === "credentials" || account?.provider === "sso") return true; // gated inside authorize()
       if (account?.provider !== "line") return false;
       const lineId = account.providerAccountId;
       if (!lineId) return false;
@@ -67,7 +110,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         const adminExists = await prisma.funUser.count({
           where: { role: "admin", isActive: 1, approvedAt: { not: null } },
         });
-        await prisma.funUser.create({
+        const created = await prisma.funUser.create({
           data: {
             displayName: user.name ?? "LINE User",
             lineUserid: lineId,
@@ -76,6 +119,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
             approvedAt: adminExists ? null : new Date(),
           },
         });
+        audit({ action: "user.create", entityType: "user", entityId: created.userId, actor: { userId: created.userId, name: created.displayName, role: created.role }, detail: "self-registered via LINE" });
       } else if (user.image && existing.pictureUrl !== user.image) {
         await prisma.funUser.update({ where: { userId: existing.userId }, data: { pictureUrl: user.image } }).catch(() => {});
       }
@@ -89,7 +133,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
       if (account?.provider === "line" && account.providerAccountId) {
         const fu = await prisma.funUser.findFirst({ where: { lineUserid: account.providerAccountId } });
         if (fu) token.funUserId = fu.userId;
-      } else if (account?.provider === "credentials" && user?.id) {
+      } else if ((account?.provider === "credentials" || account?.provider === "sso") && user?.id) {
         token.funUserId = Number(user.id);
       }
       // Refresh role/approved/name/picture from the DB on every call — cheap,

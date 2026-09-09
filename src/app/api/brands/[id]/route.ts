@@ -1,11 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { requireRole } from "@/lib/authz";
+import { requirePerm } from "@/lib/authz";
+import { audit } from "@/lib/audit";
 
 type Ctx = { params: Promise<{ id: string }> };
 
 export async function PUT(request: NextRequest, { params }: Ctx) {
-  const rq = await requireRole(["admin", "gm"]);
+  const rq = await requirePerm("settings", "edit");
   if (!rq.ok) return rq.response;
 
   const { id } = await params;
@@ -15,7 +16,9 @@ export async function PUT(request: NextRequest, { params }: Ctx) {
   const name = b.brandName?.trim();
   if (!name) return NextResponse.json({ error: "missing brandName" }, { status: 400 });
   try {
+    const before = await prisma.brand.findUnique({ where: { brandId } });
     await prisma.brand.update({ where: { brandId }, data: { brandName: name } });
+    audit({ action: "settings.update", entityType: "brand", entityId: brandId, before: { brandName: before?.brandName }, after: { brandName: name } });
     return NextResponse.json({ ok: true });
   } catch {
     return NextResponse.json({ error: "แก้ไขไม่สำเร็จ (ชื่อซ้ำหรือไม่พบแบรนด์)" }, { status: 409 });
@@ -26,7 +29,7 @@ export async function PUT(request: NextRequest, { params }: Ctx) {
 // any branch / lead / model referencing the brand blocks the delete with a
 // reason, so history is never orphaned.
 export async function DELETE(_request: NextRequest, { params }: Ctx) {
-  const rq = await requireRole(["admin", "gm"]);
+  const rq = await requirePerm("settings", "del");
   if (!rq.ok) return rq.response;
 
   const { id } = await params;
@@ -45,6 +48,7 @@ export async function DELETE(_request: NextRequest, { params }: Ctx) {
   if (blockers.length) {
     return NextResponse.json({ error: `ลบไม่ได้ — มีการใช้งานอยู่: ${blockers.join(", ")}` }, { status: 409 });
   }
-  await prisma.brand.delete({ where: { brandId } });
+  const row = await prisma.brand.delete({ where: { brandId } });
+  audit({ action: "settings.delete", entityType: "brand", entityId: brandId, before: { brandName: row.brandName } });
   return NextResponse.json({ ok: true });
 }

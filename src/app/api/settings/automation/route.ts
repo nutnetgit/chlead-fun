@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSetting, setSetting, getLineQuotaConfig, setLineQuotaConfig, getLineMessageCount, getOwnerSwitchConfig, setOwnerSwitchConfig, type OwnerSwitchConfig } from "@/lib/settings";
-import { requireRole } from "@/lib/authz";
+import { requirePerm } from "@/lib/authz";
+import { audit } from "@/lib/audit";
 
 export type AutomationConfig = {
   sla: { enabled: boolean };
@@ -35,7 +36,7 @@ export async function GET() {
 }
 
 export async function PUT(request: NextRequest) {
-  const rq = await requireRole(["admin", "gm"]);
+  const rq = await requirePerm("settings", "edit");
   if (!rq.ok) return rq.response;
 
   const body = (await request.json().catch(() => ({}))) as Partial<AutomationConfig> & {
@@ -43,6 +44,7 @@ export async function PUT(request: NextRequest) {
     ownerSwitch?: Partial<OwnerSwitchConfig>;
   };
   const { lineQuota: lineQuotaPatch, ownerSwitch: ownerSwitchPatch, ...jobPatch } = body;
+  audit({ action: "settings.update", entityType: "automation", after: body });
 
   if (lineQuotaPatch) await setLineQuotaConfig(lineQuotaPatch);
   if (ownerSwitchPatch) await setOwnerSwitchConfig(ownerSwitchPatch);

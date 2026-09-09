@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { requireRole, managerAllowedBranchIds } from "@/lib/authz";
+import { requirePerm, branchScopeFor, managerAllowedBranchIds } from "@/lib/authz";
+import { hasPerm } from "@/lib/menuAccess";
+import { audit } from "@/lib/audit";
 
 const DAY = 24 * 60 * 60 * 1000;
 
@@ -17,19 +19,24 @@ const DAY = 24 * 60 * 60 * 1000;
  * URL). manager/gm/admin can request any owner or none (see everything).
  */
 export async function GET(request: NextRequest) {
-  const rq = await requireRole(["sales", "manager", "gm", "admin"]);
+  const rq = await requirePerm("leads");
   if (!rq.ok) return rq.response;
 
   const p = request.nextUrl.searchParams;
   const filter = p.get("filter") ?? "due";
-  const owner = rq.role === "sales" ? String(rq.funUserId) : p.get("owner");
+  // leads·viewall (user req 2026-09-09, legacy "เห็นทุกรายการ"): a sales user
+  // holding it sees every lead in their own branches instead of only theirs.
+  const salesViewall = rq.role === "sales" && hasPerm(rq.perms, "leads", "viewall");
+  const owner = rq.role === "sales" && !salesViewall ? String(rq.funUserId) : p.get("owner");
 
   // Branch scope for managers (user req 2026-07-14: a manager opening Lead
-  // Center saw every brand's leads) — scoped to their fun_user_branch links;
-  // admin/gm stay global; a manager with no links falls back to everything
-  // (same graceful rule as the QR modal / pool).
+  // Center saw every brand's leads) — scoped to their fun_user_branch links
+  // unless they hold leads·viewall; admin/gm stay global; a manager with no
+  // links falls back to everything (same graceful rule as the QR modal / pool).
   let branchScope: number[] | null = null;
   if (rq.role === "manager") {
+    branchScope = await branchScopeFor(rq, "leads", rq.perms);
+  } else if (salesViewall) {
     const allowed = await managerAllowedBranchIds(rq.funUserId!);
     if (allowed.length) branchScope = allowed;
   }
@@ -107,7 +114,7 @@ export async function POST(request: NextRequest) {
   // ownerUserId was trusted as-is — a sales user could file leads under any
   // colleague's name. Sales now always own what they create; manager+ keep
   // the owner picker.
-  const rq = await requireRole(["sales", "manager", "gm", "admin"]);
+  const rq = await requirePerm("leads", "add");
   if (!rq.ok) return rq.response;
   if (rq.role === "sales") b.ownerUserId = rq.funUserId ?? undefined;
 
@@ -157,6 +164,7 @@ export async function POST(request: NextRequest) {
         createdBy: typeof b.ownerUserId === "number" ? b.ownerUserId : null,
       },
     });
+    audit({ action: "lead.reopen", entityType: "lead", entityId: existing.leadId, branchId, detail: `manual via ${channel.channelName}` });
     return NextResponse.json({ ok: true, reopen: true, leadId: Number(existing.leadId) });
   }
 
@@ -183,5 +191,6 @@ export async function POST(request: NextRequest) {
       createdBy: typeof b.ownerUserId === "number" ? b.ownerUserId : null,
     },
   });
+  audit({ action: "lead.create", entityType: "lead", entityId: lead.leadId, branchId, after: { brandId, branchId, channel: channel.channelName, ownerUserId: lead.ownerUserId, model: lead.interestedVariant } });
   return NextResponse.json({ ok: true, reopen: false, leadId: Number(lead.leadId) }, { status: 201 });
 }

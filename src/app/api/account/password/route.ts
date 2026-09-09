@@ -3,6 +3,7 @@ import bcrypt from "bcryptjs";
 import { prisma } from "@/lib/prisma";
 import { auth } from "@/auth";
 import { validatePassword } from "@/lib/password";
+import { audit } from "@/lib/audit";
 
 /**
  * Self-service password change for the currently signed-in user (works for
@@ -30,6 +31,7 @@ export async function POST(request: NextRequest) {
 
   const passwordHash = await bcrypt.hash(String(newPassword), 10);
   await prisma.funUser.update({ where: { userId: user.userId }, data: { passwordHash, mustChangePassword: 0 } });
+  audit({ action: "user.password_change", entityType: "user", entityId: user.userId, detail: user.passwordHash ? "changed" : "first password set" });
 
   return NextResponse.json({ ok: true });
 }

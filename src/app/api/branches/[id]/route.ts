@@ -1,11 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { requireRole } from "@/lib/authz";
+import { requirePerm } from "@/lib/authz";
+import { audit, diffFields } from "@/lib/audit";
 
 type Ctx = { params: Promise<{ id: string }> };
 
 export async function PUT(request: NextRequest, { params }: Ctx) {
-  const rq = await requireRole(["admin", "gm"]);
+  const rq = await requirePerm("settings", "edit");
   if (!rq.ok) return rq.response;
 
   const { id } = await params;
@@ -23,7 +24,9 @@ export async function PUT(request: NextRequest, { params }: Ctx) {
   if (!Object.keys(data).length) return NextResponse.json({ error: "nothing to update" }, { status: 400 });
 
   try {
+    const before = await prisma.branch.findUnique({ where: { branchId } });
     await prisma.branch.update({ where: { branchId }, data });
+    audit({ action: "settings.update", entityType: "branch", entityId: branchId, branchId, ...diffFields(before as unknown as Record<string, unknown>, data) });
     return NextResponse.json({ ok: true });
   } catch (e) {
     const msg = String(e).includes("P2002") ? "รหัสสาขานี้ถูกใช้แล้ว" : "ไม่พบสาขา";
@@ -35,7 +38,7 @@ export async function PUT(request: NextRequest, { params }: Ctx) {
 // in use (leads, users, channel routing, duty roster) delete is blocked —
 // deactivate instead so history stays intact.
 export async function DELETE(_request: NextRequest, { params }: Ctx) {
-  const rq = await requireRole(["admin", "gm"]);
+  const rq = await requirePerm("settings", "del");
   if (!rq.ok) return rq.response;
 
   const { id } = await params;
@@ -62,5 +65,6 @@ export async function DELETE(_request: NextRequest, { params }: Ctx) {
     return NextResponse.json({ error: `ลบไม่ได้ — มีการใช้งานอยู่: ${blockers.join(", ")} (ปิดใช้งานแทนได้)` }, { status: 409 });
   }
   await prisma.branch.delete({ where: { branchId } });
+  audit({ action: "settings.delete", entityType: "branch", entityId: branchId, branchId, before: { branchName: branch.branchName, branchCode: branch.branchCode, brandId: branch.brandId } });
   return NextResponse.json({ ok: true });
 }

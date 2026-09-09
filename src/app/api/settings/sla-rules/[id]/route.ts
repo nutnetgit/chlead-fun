@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { requireRole, managerAllowedBrandIds } from "@/lib/authz";
+import { requirePerm, managerAllowedBrandIds } from "@/lib/authz";
+import { audit } from "@/lib/audit";
 
 type Ctx = { params: Promise<{ id: string }> };
 
@@ -30,7 +31,7 @@ async function checkManagerScope(rq: { role: string | null; funUserId: number | 
 }
 
 export async function PUT(request: NextRequest, { params }: Ctx) {
-  const rq = await requireRole(["manager", "gm", "admin"]);
+  const rq = await requirePerm("settings-sla-rules", "edit");
   if (!rq.ok) return rq.response;
 
   const { id } = await params;
@@ -71,6 +72,7 @@ export async function PUT(request: NextRequest, { params }: Ctx) {
 
   try {
     await prisma.slaRule.update({ where: { ruleId }, data });
+    audit({ action: "settings.update", entityType: "sla_rule", entityId: ruleId, after: data });
     return NextResponse.json({ ok: true });
   } catch {
     return NextResponse.json({ error: "ไม่พบกฎ" }, { status: 404 });
@@ -81,7 +83,7 @@ export async function PUT(request: NextRequest, { params }: Ctx) {
 // that's ever been matched by the SLA engine can't be hard-deleted; toggle
 // isActive off instead so history stays intact (same policy as branches).
 export async function DELETE(_request: NextRequest, { params }: Ctx) {
-  const rq = await requireRole(["manager", "gm", "admin"]);
+  const rq = await requirePerm("settings-sla-rules", "del");
   if (!rq.ok) return rq.response;
 
   const { id } = await params;
@@ -98,6 +100,7 @@ export async function DELETE(_request: NextRequest, { params }: Ctx) {
 
   try {
     await prisma.slaRule.delete({ where: { ruleId } });
+    audit({ action: "settings.delete", entityType: "sla_rule", entityId: ruleId });
     return NextResponse.json({ ok: true });
   } catch {
     return NextResponse.json({ error: "ไม่พบกฎ" }, { status: 404 });

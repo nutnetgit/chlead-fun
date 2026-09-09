@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { requireRole, requireLeadAccess } from "@/lib/authz";
+import { requirePerm, requireLeadAccess } from "@/lib/authz";
+import { audit, diffFields } from "@/lib/audit";
 
 type Ctx = { params: Promise<{ id: string }> };
 
@@ -96,6 +97,10 @@ export async function PATCH(request: NextRequest, { params }: Ctx) {
   const access = await requireLeadAccess(leadId);
   if (!access.ok) return access.response;
   const body = (await request.json().catch(() => ({}))) as { stage?: string; temperature?: string; archived?: boolean; changedBy?: number; ownerUserId?: number };
+  // Marking a lead lost is a "cancel"-class action (legacy u_me_cancel);
+  // everything else here is an edit.
+  const perm = await requirePerm("leads", body.stage === "lost" ? "cancel" : "edit");
+  if (!perm.ok) return perm.response;
 
   const lead = access.lead;
 
@@ -142,6 +147,11 @@ export async function PATCH(request: NextRequest, { params }: Ctx) {
       data: { leadId, fromUserId: lead.ownerUserId, toUserId: data.ownerUserId, reason: "manager_reassign", assignedBy: access.funUserId },
     }).catch(() => {});
   }
+  const { before, after } = diffFields(lead as unknown as Record<string, unknown>, data);
+  const action = data.stage && data.stage !== lead.stage ? "lead.stage"
+    : typeof data.ownerUserId === "number" && data.ownerUserId !== lead.ownerUserId ? "lead.reassign"
+    : "lead.update";
+  audit({ action, entityType: "lead", entityId: leadId, branchId: lead.branchId, before, after });
   return NextResponse.json({ ok: true });
 }
 
@@ -152,7 +162,7 @@ export async function PATCH(request: NextRequest, { params }: Ctx) {
 // SQL schema (sql/001 owns it, Prisma just mirrors), so each is cleared
 // explicitly in one transaction before the lead row itself.
 export async function DELETE(_request: NextRequest, { params }: Ctx) {
-  const rq = await requireRole(["admin", "gm"]);
+  const rq = await requirePerm("leads", "del");
   if (!rq.ok) return rq.response;
 
   const { id } = await params;
@@ -179,5 +189,6 @@ export async function DELETE(_request: NextRequest, { params }: Ctx) {
     prisma.leadStageHistory.deleteMany({ where: { leadId } }),
     prisma.lead.delete({ where: { leadId } }),
   ]);
+  audit({ action: "lead.delete", entityType: "lead", entityId: leadId, branchId: lead.branchId, before: { stage: lead.stage, status: lead.status, ownerUserId: lead.ownerUserId, archivedAt: lead.archivedAt } });
   return NextResponse.json({ ok: true });
 }

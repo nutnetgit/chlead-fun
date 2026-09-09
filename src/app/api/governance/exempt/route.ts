@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { exemptLead } from "@/lib/governance";
 import { requireRole } from "@/lib/authz";
+import { audit } from "@/lib/audit";
 
 // Completes the "exempt" postback action (handoff §5/ADR-011: exemption
 // always requires a written reason, always logged). Body: { leadId, reason }.
@@ -24,5 +25,6 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ ok: false, error: "missing leadId" }, { status: 400 });
   }
   const result = await exemptLead(BigInt(body.leadId), body.reason ?? "", rq.funUserId);
+  audit({ action: "lead.sla_exempt", entityType: "lead", entityId: body.leadId, result: result.ok ? "ok" : "error", detail: (body.reason ?? "").slice(0, 300) });
   return NextResponse.json(result, { status: result.ok ? 200 : 400 });
 }

@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { auth, authEnabled } from "@/auth";
 import { prisma } from "@/lib/prisma";
-import { resolveMenus } from "@/lib/menuAccess";
+import { resolvePerms, roleDefaultPerms } from "@/lib/menuAccess";
 
 export const runtime = "nodejs";
 
@@ -15,12 +15,19 @@ export async function GET() {
   const u = session?.user as (Record<string, unknown> & { name?: string; image?: string }) | undefined;
   if (!u?.funUserId) return NextResponse.json({ authEnabled: true, signedIn: false });
 
-  const fu = await prisma.funUser.findUnique({ where: { userId: Number(u.funUserId) } });
+  const fu = await prisma.funUser.findUnique({ where: { userId: Number(u.funUserId) }, include: { menuRows: true } });
   if (!fu) return NextResponse.json({ authEnabled: true, signedIn: false });
+
+  // Effective 6-flag permissions (fun_user_menu rows, else role defaults) —
+  // `menus` (the viewable keys) drives the sidebar filter + page gate;
+  // `perms` drives per-button visibility. Server routes re-check via requirePerm.
+  // Admin is never restricted by rows (same rule as requirePerm).
+  const perms = fu.role === "admin" ? roleDefaultPerms("admin") : resolvePerms(fu.role, fu.menuRows);
 
   return NextResponse.json({
     authEnabled: true,
     signedIn: true,
+    spsSso: !!process.env.SPS_SSO_LANDING_URL,
     user: {
       funUserId: fu.userId,
       displayName: fu.displayName,
@@ -30,10 +37,10 @@ export async function GET() {
       approved: !!fu.approvedAt && fu.isActive === 1,
       pictureUrl: fu.pictureUrl,
       branchId: fu.branchId,
+      dmsUserId: fu.dmsUserId,
       mustChangePassword: !!fu.mustChangePassword,
-      // Effective menu access (role defaults + per-user overrides) — drives
-      // the sidebar filter and the page gate in Chrome.tsx.
-      menus: resolveMenus(fu.role, fu.menuAccess),
+      menus: Object.keys(perms),
+      perms,
     },
   });
 }

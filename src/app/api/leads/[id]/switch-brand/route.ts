@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { requireLeadAccess } from "@/lib/authz";
+import { requireLeadAccess, requirePerm } from "@/lib/authz";
 import { linePush } from "@/lib/flex";
 import { getLineCredsForBrand } from "@/lib/lineConfig";
 
@@ -28,6 +28,8 @@ export async function POST(request: NextRequest, { params }: Ctx) {
   const leadId = BigInt(id || "0");
   const access = await requireLeadAccess(leadId);
   if (!access.ok) return access.response;
+  const perm = await requirePerm("leads", "edit");
+  if (!perm.ok) return perm.response;
   const b = (await request.json().catch(() => ({}))) as Record<string, unknown>;
   const brandId = Number(b.brandId);
   const branchId = Number(b.branchId);

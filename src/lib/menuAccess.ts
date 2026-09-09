@@ -1,24 +1,25 @@
-// Per-user menu access (user req 2026-07-12) — the single registry both the
-// server (/api/me, /api/users) and the client (Sidebar, Chrome page gate,
+// Per-user menu permissions — the single registry both the server (/api/me,
+// /api/users, requirePerm) and the client (Sidebar, Chrome page gate,
 // settings editor) resolve against. Pure module: no prisma/server imports,
 // so client components can use it too.
 //
-// Model: each role has a default menu set (mirrors the pre-existing role
-// sections in the sidebar); fun_user.menu_access (JSON {"key": bool}) then
-// overrides per menu, per person. NULL menu_access = pure role defaults, so
-// every user behaves exactly as before until an admin edits them.
+// Model (user req 2026-09-09, replacing the 2026-07-12 {"menuKey": bool}
+// JSON overrides): the legacy SPS shape — one row per user × menu carrying
+// six flags (add / edit / cancel / del / report / viewall), and a row
+// existing at all = the user can VIEW that menu. It's the same table shape
+// as SPS `user_menu` (u_me_add …) so the DMS team can sync permissions in
+// either direction; MENU_DEFS[].legacyCode names the closest SPS menu code.
 //
-// Settings split (user req 2026-07-12): "settings" used to be one monolithic
-// key covering all of /settings/*, admin/gm only. It's now split so manager
-// gets its own default slice — teams, models/colors, quotation options,
-// conversion rates — while "settings" (everything else: users, branches,
-// LINE OA, sources, channels, automation, logs, status) stays admin/gm only.
+// A user with NO rows falls back to their role's default matrix below —
+// exactly what SPS does when it materialises a new user from
+// user_menu_department. The defaults reproduce the app's behaviour before
+// this change (sales own-only, manager branch-scoped with a delegated
+// settings slice, gm/admin everything), so nobody's access moved.
 //
-// Enforcement depth (per user decision 2026-07-12): menus hidden from the
-// sidebar + page entry blocked in the app shell. API routes keep their own
-// role checks (some routes additionally scope managers to their own brands,
-// e.g. /api/models — see that route's comments) — this menu layer is
-// workflow shaping, not the security boundary by itself.
+// Enforcement: server routes call requirePerm(menuKey, flag) (src/lib/authz.ts)
+// for mutations/exports; the UI hides menus and buttons from the same map.
+// The `viewall` flag lifts branch/owner scoping for that menu (legacy: "ไม่ติ๊ก
+// = เห็นเฉพาะของตัวเอง/สาขาตัวเอง").
 
 export type MenuKey =
   | "leads" | "chat" | "pool"
@@ -26,61 +27,123 @@ export type MenuKey =
   | "settings-teams" | "settings-models" | "settings-quotation" | "settings-conversion-rate" | "settings-sla-rules" | "settings-channels"
   | "settings";
 
-export const MENU_DEFS: { key: MenuKey; label: string; roles: string[] | null }[] = [
-  { key: "leads", label: "Pipeline ของฉัน", roles: null }, // null = every role
-  { key: "chat", label: "แชทลูกค้า", roles: null },
-  { key: "pool", label: "Lead Pool", roles: null },
-  { key: "dashboard", label: "Dashboard ทีม", roles: ["manager", "gm", "admin"] },
-  { key: "lead-center", label: "ศูนย์รวม Lead", roles: ["manager", "gm", "admin"] },
-  // Sales included (user req 2026-07-14 — this key had no "sales" at all, so
-  // the page/API's existing self-scoping for a sales viewer was unreachable:
-  // the menu item never showed and the sidebar's page gate blocked direct
-  // URL entry too. A sales user sees only their own numbers on this page;
-  // the "ตั้งเป้าจอง (ผจก.)" card stays manager+-only inside the page itself.
-  { key: "runrate", label: "Run Rate เป้าเดือน", roles: ["sales", "manager", "gm", "admin"] },
-  { key: "events", label: "Event / บูธ", roles: ["manager", "gm", "admin"] },
-  { key: "reports", label: "รายงาน", roles: ["manager", "gm", "admin"] },
+export type PermFlag = "add" | "edit" | "cancel" | "del" | "report" | "viewall";
+export const PERM_FLAGS: PermFlag[] = ["add", "edit", "cancel", "del", "report", "viewall"];
+export const PERM_FLAG_TH: Record<PermFlag, string> = {
+  add: "เพิ่ม", edit: "แก้ไข", cancel: "ยกเลิก", del: "ลบ", report: "รายงาน", viewall: "เห็นทุกสาขา",
+};
+export type PermFlags = Record<PermFlag, boolean>;
+// Key present = can view that menu.
+export type PermMap = Partial<Record<MenuKey, PermFlags>>;
+
+export const MENU_DEFS: { key: MenuKey; label: string; roles: string[] | null; legacyCode?: string; group: "งานขาย" | "ผู้จัดการ" | "ตั้งค่า" }[] = [
+  { key: "leads", label: "Pipeline ของฉัน", roles: null, legacyCode: "pros2", group: "งานขาย" }, // null = every role
+  { key: "chat", label: "แชทลูกค้า", roles: null, legacyCode: "pros1", group: "งานขาย" },
+  { key: "pool", label: "Lead Pool", roles: null, legacyCode: "pros6", group: "งานขาย" },
+  { key: "dashboard", label: "Dashboard ทีม", roles: ["manager", "gm", "admin"], legacyCode: "pros4", group: "ผู้จัดการ" },
+  { key: "lead-center", label: "ศูนย์รวม Lead", roles: ["manager", "gm", "admin"], legacyCode: "pros5", group: "ผู้จัดการ" },
+  // Sales included (user req 2026-07-14): a sales user sees only their own
+  // numbers on this page; the "ตั้งเป้าจอง (ผจก.)" card stays manager+-only.
+  { key: "runrate", label: "Run Rate เป้าเดือน", roles: ["sales", "manager", "gm", "admin"], legacyCode: "sps15", group: "งานขาย" },
+  { key: "events", label: "Event / บูธ", roles: ["manager", "gm", "admin"], legacyCode: "sps20", group: "ผู้จัดการ" },
+  { key: "reports", label: "รายงาน", roles: ["manager", "gm", "admin"], legacyCode: "sps15", group: "ผู้จัดการ" },
   // Manager's slice of settings (user req 2026-07-12).
-  { key: "settings-teams", label: "ตั้งค่า: ทีมขาย", roles: ["manager", "gm", "admin"] },
-  { key: "settings-models", label: "ตั้งค่า: รุ่นรถและสี", roles: ["manager", "gm", "admin"] },
-  { key: "settings-quotation", label: "ตั้งค่า: ใบเสนอราคา", roles: ["manager", "gm", "admin"] },
-  { key: "settings-conversion-rate", label: "ตั้งค่า: Conversion Rate", roles: ["manager", "gm", "admin"] },
-  // Split out from the admin catch-all (user req 2026-07-15) so a manager
-  // can be granted SLA rule access without also getting users/branches/
-  // automation/etc. A manager's write access here is scoped server-side to
-  // brands they manage (see /api/settings/sla-rules) — same rule as
-  // settings-models. NOT the same thing as the "SLA Engine" on/off toggle on
-  // /settings/automation (still in the admin-only "settings" bundle below) —
-  // that just flips whether the hourly job runs at all; this page sets the
-  // actual day/minute thresholds the job uses when it does run.
-  { key: "settings-sla-rules", label: "ตั้งค่า: กฎ SLA", roles: ["manager", "gm", "admin"] },
-  // Split out from the admin catch-all (user req 2026-07-19) so a test/
-  // reviewer account (e.g. for Meta App Review) can be granted just the
-  // Channels page — without it, the only way to see /channels was the
-  // "settings" bundle below, which also opens user management, branches,
-  // LINE OA, automation, logs, and status. Default stays admin/gm since
-  // /api/channels itself is still admin/gm-only server-side (no manager
-  // brand-scoping exists there, unlike settings-models/settings-sla-rules);
-  // a manager only gets in via an explicit per-user override.
-  { key: "settings-channels", label: "ตั้งค่า: ช่องทางรับ Lead", roles: ["admin", "gm"] },
+  { key: "settings-teams", label: "ตั้งค่า: ทีมขาย", roles: ["manager", "gm", "admin"], legacyCode: "sps69", group: "ตั้งค่า" },
+  { key: "settings-models", label: "ตั้งค่า: รุ่นรถและสี", roles: ["manager", "gm", "admin"], legacyCode: "sps4", group: "ตั้งค่า" },
+  { key: "settings-quotation", label: "ตั้งค่า: ใบเสนอราคา", roles: ["manager", "gm", "admin"], legacyCode: "pros7", group: "ตั้งค่า" },
+  { key: "settings-conversion-rate", label: "ตั้งค่า: Conversion Rate", roles: ["manager", "gm", "admin"], group: "ตั้งค่า" },
+  // Split out from the admin catch-all (user req 2026-07-15). A manager's
+  // write access is scoped server-side to brands they manage.
+  { key: "settings-sla-rules", label: "ตั้งค่า: กฎ SLA", roles: ["manager", "gm", "admin"], group: "ตั้งค่า" },
+  // Split out 2026-07-19 so a test/reviewer account can be granted just the
+  // Channels page. /api/channels is still admin/gm-only server-side.
+  { key: "settings-channels", label: "ตั้งค่า: ช่องทางรับ Lead", roles: ["admin", "gm"], legacyCode: "pros3", group: "ตั้งค่า" },
   // Everything else under /settings (users, branches, LINE OA, sources,
-  // automation, logs, status) — admin/gm only, unchanged.
-  { key: "settings", label: "ตั้งค่า (ส่วนแอดมิน)", roles: ["admin", "gm"] },
+  // automation, logs, status) — admin/gm only.
+  { key: "settings", label: "ตั้งค่า (ส่วนแอดมิน)", roles: ["admin", "gm"], legacyCode: "sps1", group: "ตั้งค่า" },
 ];
 
+export const MENU_LABEL: Record<MenuKey, string> = Object.fromEntries(MENU_DEFS.map((m) => [m.key, m.label])) as Record<MenuKey, string>;
+
+const f = (add = 0, edit = 0, cancel = 0, del = 0, report = 0, viewall = 0): PermFlags =>
+  ({ add: !!add, edit: !!edit, cancel: !!cancel, del: !!del, report: !!report, viewall: !!viewall });
+const ALL = f(1, 1, 1, 1, 1, 1);
+
+// Role default matrix — reproduces pre-2026-09-09 behaviour exactly:
+//  sales:   own leads only (viewall 0), may create/edit/mark-lost their own
+//           lead, chat, claim from pool, see own Run Rate; no delete/export.
+//  manager: branch-scoped (viewall 0); forfeit = cancel on leads/lead-center;
+//           report on the manager pages; the delegated settings slice.
+//  gm/admin: every flag on every menu they have.
+export const ROLE_DEFAULT_PERMS: Record<string, PermMap> = {
+  sales: {
+    leads: f(1, 1, 1, 0, 0, 0),
+    chat: f(1, 1, 0, 0, 0, 0),
+    pool: f(0, 1, 0, 0, 0, 0),
+    runrate: f(0, 0, 0, 0, 0, 0),
+  },
+  manager: {
+    leads: f(1, 1, 1, 0, 1, 0),
+    chat: f(1, 1, 0, 0, 0, 0),
+    pool: f(0, 1, 1, 0, 0, 0),
+    dashboard: f(0, 0, 0, 0, 1, 0),
+    "lead-center": f(0, 1, 1, 0, 1, 0),
+    runrate: f(0, 1, 0, 0, 1, 0),
+    events: f(1, 1, 1, 1, 1, 0),
+    reports: f(0, 0, 0, 0, 1, 0),
+    "settings-teams": f(1, 1, 0, 1, 0, 0),
+    "settings-models": f(1, 1, 0, 1, 0, 0),
+    "settings-quotation": f(1, 1, 0, 1, 0, 0),
+    "settings-conversion-rate": f(0, 1, 0, 0, 0, 0),
+    "settings-sla-rules": f(1, 1, 0, 1, 0, 0),
+  },
+  gm: Object.fromEntries(MENU_DEFS.filter((m) => m.roles === null || m.roles.includes("gm")).map((m) => [m.key, ALL])) as PermMap,
+  admin: Object.fromEntries(MENU_DEFS.filter((m) => m.roles === null || m.roles.includes("admin")).map((m) => [m.key, ALL])) as PermMap,
+};
+
+export function roleDefaultPerms(role: string): PermMap {
+  return ROLE_DEFAULT_PERMS[role] ?? {};
+}
 export function roleDefaultMenus(role: string): MenuKey[] {
-  return MENU_DEFS.filter((m) => m.roles === null || m.roles.includes(role)).map((m) => m.key);
+  return Object.keys(roleDefaultPerms(role)) as MenuKey[];
 }
 
-// role + stored overrides JSON → effective allowed menu list.
-export function resolveMenus(role: string, menuAccessJson: string | null | undefined): MenuKey[] {
-  let overrides: Record<string, boolean> = {};
-  if (menuAccessJson) {
-    try { overrides = JSON.parse(menuAccessJson) as Record<string, boolean>; } catch { /* corrupt → role defaults */ }
+const VALID_KEYS = new Set<string>(MENU_DEFS.map((m) => m.key));
+export const isMenuKey = (k: string): k is MenuKey => VALID_KEYS.has(k);
+
+export type UserMenuRowLike = {
+  menuKey: string;
+  canAdd: number | boolean; canEdit: number | boolean; canCancel: number | boolean;
+  canDel: number | boolean; canReport: number | boolean; canViewall: number | boolean;
+};
+
+// rows → effective map. Any rows at all = rows are authoritative (a user the
+// admin has customised); none = role defaults.
+export function resolvePerms(role: string, rows: UserMenuRowLike[] | null | undefined): PermMap {
+  if (!rows || rows.length === 0) return roleDefaultPerms(role);
+  const out: PermMap = {};
+  for (const r of rows) {
+    if (!isMenuKey(r.menuKey)) continue;
+    out[r.menuKey] = { add: !!r.canAdd, edit: !!r.canEdit, cancel: !!r.canCancel, del: !!r.canDel, report: !!r.canReport, viewall: !!r.canViewall };
   }
-  return MENU_DEFS
-    .filter((m) => (typeof overrides[m.key] === "boolean" ? overrides[m.key] : m.roles === null || m.roles.includes(role)))
-    .map((m) => m.key);
+  return out;
+}
+
+export function resolveMenus(role: string, rows: UserMenuRowLike[] | null | undefined): MenuKey[] {
+  return Object.keys(resolvePerms(role, rows)) as MenuKey[];
+}
+
+export function hasPerm(perms: PermMap | null | undefined, key: MenuKey, flag?: PermFlag): boolean {
+  const p = perms?.[key];
+  if (!p) return false;
+  return flag ? !!p[flag] : true;
+}
+
+// PermMap → rows for storage (fun_user_menu).
+export function permsToRows(perms: PermMap): { menuKey: MenuKey; canAdd: number; canEdit: number; canCancel: number; canDel: number; canReport: number; canViewall: number }[] {
+  return (Object.entries(perms) as [MenuKey, PermFlags][]).filter(([k]) => isMenuKey(k)).map(([menuKey, p]) => ({
+    menuKey, canAdd: +!!p.add, canEdit: +!!p.edit, canCancel: +!!p.cancel, canDel: +!!p.del, canReport: +!!p.report, canViewall: +!!p.viewall,
+  }));
 }
 
 // Which menu a pathname belongs to (for the page gate + subnav filtering).
@@ -117,7 +180,7 @@ export function menuKeyForPath(pathname: string): MenuKey | null {
 // Landing page for the single "ตั้งค่า" sidebar entry — picks the first
 // settings page this user's menus actually allow, in a sensible priority
 // order, so admin/gm keep their traditional /settings/users landing while a
-// manager with only the 4 delegated pages lands somewhere real instead of a
+// manager with only the delegated pages lands somewhere real instead of a
 // blocked page. Returns null if the user has no settings access at all.
 const SETTINGS_LANDING: { key: MenuKey; href: string }[] = [
   { key: "settings", href: "/settings/users" },

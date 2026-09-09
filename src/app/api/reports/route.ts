@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { requireRole, managerAllowedBranchIds } from "@/lib/authz";
+import { requirePerm, branchScopeFor } from "@/lib/authz";
 
 // Manager reports: filtered aggregates for the /reports page.
 // Filters: from, to (lead created date), brandId, branchId, ownerId.
@@ -13,14 +13,10 @@ import { requireRole, managerAllowedBranchIds } from "@/lib/authz";
 // ever NARROW within the manager's own scope, never escape it: a lead must
 // satisfy branchScope AND the requested filter simultaneously.
 export async function GET(request: NextRequest) {
-  const rq = await requireRole(["manager", "gm", "admin"]);
+  const rq = await requirePerm("reports");
   if (!rq.ok) return rq.response;
 
-  let branchScope: number[] | null = null;
-  if (rq.role === "manager") {
-    const allowed = await managerAllowedBranchIds(rq.funUserId!);
-    if (allowed.length) branchScope = allowed;
-  }
+  const branchScope = await branchScopeFor(rq, "reports", rq.perms);
 
   const p = request.nextUrl.searchParams;
   const from = p.get("from") ? new Date(`${p.get("from")}T00:00:00`) : new Date(Date.now() - 90 * 864e5);

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { requireRole } from "@/lib/authz";
+import { requirePerm } from "@/lib/authz";
+import { audit } from "@/lib/audit";
 
 type Ctx = { params: Promise<{ id: string }> };
 
@@ -11,7 +12,7 @@ type Ctx = { params: Promise<{ id: string }> };
 // anyone): sales always claim for THEMSELVES (body userId ignored);
 // manager+ may pass userId to assign on someone's behalf.
 export async function POST(request: NextRequest, { params }: Ctx) {
-  const rq = await requireRole(["sales", "manager", "gm", "admin"]);
+  const rq = await requirePerm("pool", "edit");
   if (!rq.ok) return rq.response;
 
   const { id } = await params;
@@ -59,5 +60,6 @@ export async function POST(request: NextRequest, { params }: Ctx) {
     }),
   ]);
 
+  audit({ action: "lead.claim", entityType: "lead", entityId: pool.leadId, branchId: lead?.branchId ?? null, after: { ownerUserId: newOwnerId, stage: resumeStage }, detail: `pool #${poolId}` });
   return NextResponse.json({ ok: true });
 }

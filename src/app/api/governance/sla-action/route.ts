@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireRole } from "@/lib/authz";
+import { audit } from "@/lib/audit";
 import { handleSlaPostback, type PostbackAction } from "@/lib/governance";
 import { getLineCredsForBrand } from "@/lib/lineConfig";
 import { linePush } from "@/lib/flex";
@@ -27,6 +28,7 @@ export async function POST(request: NextRequest) {
   // funUserId is null only in auth-disabled mode — governance actions still
   // work there (soft-launch parity with the rest of the app), just unattributed.
   const result = await handleSlaPostback(action, BigInt(b.leadId), rq.funUserId ?? 0);
+  audit({ action: "lead.sla_action", entityType: "lead", entityId: b.leadId, detail: `${action}: ${result.replyText?.slice(0, 200) ?? ""}` });
 
   // Per-brand OA (user req 2026-07-15 — retire the single legacy channel
   // everywhere; this was the last staff-facing push still hardcoded to it).

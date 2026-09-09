@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { requireRole } from "@/lib/authz";
+import { requirePerm } from "@/lib/authz";
+import { audit } from "@/lib/audit";
 
 type Ctx = { params: Promise<{ id: string }> };
 
@@ -14,7 +15,7 @@ type Ctx = { params: Promise<{ id: string }> };
  * every other ownership-changing action in this app.
  */
 export async function POST(_request: NextRequest, { params }: Ctx) {
-  const rq = await requireRole(["manager", "gm", "admin"]);
+  const rq = await requirePerm("lead-center", "cancel");
   if (!rq.ok) return rq.response;
 
   const { id } = await params;
@@ -49,5 +50,6 @@ export async function POST(_request: NextRequest, { params }: Ctx) {
     return NextResponse.json({ error: "ริบไม่สำเร็จ — เกิดข้อผิดพลาดที่เซิร์ฟเวอร์" }, { status: 500 });
   }
 
+  audit({ action: "lead.forfeit", entityType: "lead", entityId: leadId, branchId: lead.branchId, before: { stage: lead.stage, ownerUserId: lead.ownerUserId }, after: { stage: "forfeited", ownerUserId: null }, detail: "manual forfeit → pool" });
   return NextResponse.json({ ok: true });
 }

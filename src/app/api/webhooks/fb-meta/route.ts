@@ -3,6 +3,7 @@ import { verifyMetaSignature, flattenLeadFields, type FbField } from "@/lib/meta
 import { ingestLead } from "@/lib/leads";
 import { linePushFlex } from "@/lib/flex";
 import { getLineCredsForBrand } from "@/lib/lineConfig";
+import { audit } from "@/lib/audit";
 
 export const runtime = "nodejs";
 
@@ -40,6 +41,7 @@ export async function POST(request: NextRequest) {
   console.log(`[fb-meta] POST received bytes=${raw.length} sigHeaderPresent=${!!sigHeader} sigOk=${sigOk}`);
   if (!sigOk) {
     console.log(`[fb-meta] rejected: bad signature`);
+    audit({ action: "webhook.rejected", source: "webhook", actor: null, req: request, result: "denied", entityType: "fb_webhook", detail: `bad signature, ${raw.length} bytes, header ${sigHeader ? "present" : "missing"}` });
     return NextResponse.json({ ok: false, error: "bad signature" }, { status: 401 });
   }
 

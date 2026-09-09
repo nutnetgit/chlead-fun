@@ -96,6 +96,27 @@ Triggers — see `n8n/FUN-WF*.json`):
   never overwrites human-entered values; watermark `fun_lead.chat_analyzed_at`
   (sql/030). Rides the "score" toggle in /settings/automation.
 
+Permissions, audit log and SPS SSO (2026-09-09, sql/032–034 — see
+`docs/SPS_INTEGRATION.md` for the contract handed to the DMS team):
+- Permissions are per user × per menu with six flags (add / edit / cancel /
+  del / report / viewall), the same shape as SPS `user_menu`; a row existing
+  = can view, no rows = role defaults (`src/lib/menuAccess.ts`). Every write
+  route is gated by `requirePerm(menu, flag)` (`src/lib/authz.ts`); `viewall`
+  lifts branch/owner scoping. Admin is never gated. Editor in
+  `/settings/users` (grid + "คัดลอกสิทธิ์จากผู้ใช้"), one-time migrate button
+  for the old JSON overrides, `GET /api/permissions/export` /
+  `POST /api/permissions/import` for syncing with SPS.
+- `fun_audit_log` (`src/lib/audit.ts`): who did what to which record, from
+  where, with what result — sign-ins/failures, permission changes, lead
+  create/stage/reassign/forfeit/delete, settings, exports, SSO, rejected
+  webhooks. Secrets are never stored, phones masked. Browse/export at
+  `/logs` → Audit. Retention `AUDIT_RETENTION_DAYS` (nightly purge).
+- SSO with SPS: opaque single-use 60 s tickets. Out — a จอง lead's
+  "เปิดใบจองใน SPS" button (`POST /api/sso/handoff` → `SPS_SSO_LANDING_URL`,
+  SPS verifies via `POST /api/sso/verify` with `X-Api-Token`). In — SPS calls
+  `POST /api/sso/issue` and sends the browser to `/sso?ticket=`. Identity =
+  `line_userid` (same LINE Login channel), fallback `fun_user.dms_user_id`.
+
 Settings UI: `/settings/users` (user + role + flexible multi-branch access —
 `/api/users` CRUD incl. branchIds replacement), `/settings/branches`
 (branches grouped by brand, code editing — `/api/branches` CRUD), `/channels`

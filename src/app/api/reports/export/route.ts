@@ -1,6 +1,7 @@
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { requireRole, managerAllowedBranchIds } from "@/lib/authz";
+import { requirePerm, branchScopeFor } from "@/lib/authz";
+import { audit } from "@/lib/audit";
 
 // CSV export of filtered leads (same filters as /api/reports) — for working
 // the data elsewhere (Excel, ส่งต่อฝ่ายอื่น). UTF-8 BOM so Thai opens
@@ -11,14 +12,10 @@ import { requireRole, managerAllowedBranchIds } from "@/lib/authz";
 // combined via an `AND` array so a client-requested filter can only narrow
 // within the manager's own scope, never escape it.
 export async function GET(request: NextRequest) {
-  const rq = await requireRole(["manager", "gm", "admin"]);
+  const rq = await requirePerm("reports", "report");
   if (!rq.ok) return rq.response;
 
-  let branchScope: number[] | null = null;
-  if (rq.role === "manager") {
-    const allowed = await managerAllowedBranchIds(rq.funUserId!);
-    if (allowed.length) branchScope = allowed;
-  }
+  const branchScope = await branchScopeFor(rq, "reports", rq.perms);
 
   const p = request.nextUrl.searchParams;
   const from = p.get("from") ? new Date(`${p.get("from")}T00:00:00`) : new Date(Date.now() - 90 * 864e5);
@@ -37,6 +34,8 @@ export async function GET(request: NextRequest) {
     include: { person: { include: { identifiers: true } }, channel: true, brand: true, branch: true },
     orderBy: { leadId: "asc" },
   });
+  // PII export (names/phones) — always audited.
+  audit({ action: "report.export", entityType: "leads_csv", detail: `${leads.length} rows, ${p.toString().slice(0, 200)}` });
   const users = await prisma.funUser.findMany();
   const userName = new Map(users.map((u) => [u.userId, u.displayName]));
 

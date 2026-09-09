@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { requireRole } from "@/lib/authz";
+import { requirePerm } from "@/lib/authz";
+import { audit } from "@/lib/audit";
 
 type Ctx = { params: Promise<{ brandId: string }> };
 
@@ -15,7 +16,7 @@ type Ctx = { params: Promise<{ brandId: string }> };
 // event, by testing the signature against every configured secret. See
 // resolveLineCreds in src/lib/lineConfig.ts.
 export async function PUT(request: NextRequest, { params }: Ctx) {
-  const rq = await requireRole(["admin", "gm"]);
+  const rq = await requirePerm("settings", "edit");
   if (!rq.ok) return rq.response;
 
   const { brandId: brandIdStr } = await params;
@@ -43,6 +44,8 @@ export async function PUT(request: NextRequest, { params }: Ctx) {
     console.error(`[line-oa] save failed for brand ${brandId}:`, e);
     return NextResponse.json({ error: "บันทึกไม่สำเร็จ — ดู docker logs fun-app สำหรับรายละเอียด" }, { status: 500 });
   }
+  // Credentials themselves are never logged — only that they were replaced.
+  audit({ action: "settings.update", entityType: "line_oa", entityId: brandId, after: { brand: brand.brandName, isActive, credentialsReplaced: true } });
   return NextResponse.json({ ok: true });
 }
 
@@ -50,7 +53,7 @@ export async function PUT(request: NextRequest, { params }: Ctx) {
 // — both independent of the Messaging token/secret, so this upserts (a
 // brand's LIFF can be configured before its Messaging credentials exist).
 export async function PATCH(request: NextRequest, { params }: Ctx) {
-  const rq = await requireRole(["admin", "gm"]);
+  const rq = await requirePerm("settings", "edit");
   if (!rq.ok) return rq.response;
 
   const { brandId: brandIdStr } = await params;
@@ -73,5 +76,6 @@ export async function PATCH(request: NextRequest, { params }: Ctx) {
       ...(isActiveProvided ? { isActive: b.isActive ? 1 : 0 } : {}),
     },
   });
+  audit({ action: "settings.update", entityType: "line_oa", entityId: brandId, after: { brand: brand.brandName, ...(liffIdProvided ? { liffId } : {}), ...(isActiveProvided ? { isActive: b.isActive } : {}) } });
   return NextResponse.json({ ok: true });
 }

@@ -178,7 +178,7 @@ export default function ChannelsPage() {
           <label className="block">
             <span className="text-[11px] font-medium text-[var(--muted-foreground)] mb-1 block">ชื่อเพจ</span>
             <input value={draft.fbPageName} onChange={e => setDraft({ ...draft, fbPageName: e.target.value })}
-              placeholder="เช่น Mazda ช.เอราวัณ ขอนแก่น" className={inputCls} />
+              placeholder="เช่น Mazda ช.เอราวัณ" className={inputCls} />
           </label>
           <label className="block">
             <span className="text-[11px] font-medium text-[var(--muted-foreground)] mb-1 block">แบรนด์ *</span>

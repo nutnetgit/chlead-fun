@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { requireRole, managerAllowedBrandIds } from "@/lib/authz";
+import { requirePerm, managerAllowedBrandIds } from "@/lib/authz";
+import { audit } from "@/lib/audit";
 
 type Ctx = { params: Promise<{ id: string }> };
 
@@ -8,7 +9,7 @@ type Ctx = { params: Promise<{ id: string }> };
 // Manager settings split (user req 2026-07-12): scoped to the color's
 // model's brand.
 export async function PUT(request: NextRequest, { params }: Ctx) {
-  const rq = await requireRole(["admin", "gm", "manager"]);
+  const rq = await requirePerm("settings-models", "edit");
   if (!rq.ok) return rq.response;
 
   const { id } = await params;
@@ -26,6 +27,7 @@ export async function PUT(request: NextRequest, { params }: Ctx) {
   if (typeof b.isActive !== "boolean") return NextResponse.json({ error: "missing isActive" }, { status: 400 });
   try {
     await prisma.vehicleColor.update({ where: { colorId }, data: { isActive: b.isActive ? 1 : 0 } });
+    audit({ action: "settings.update", entityType: "color", entityId: colorId, after: { isActive: b.isActive } });
     return NextResponse.json({ ok: true });
   } catch {
     return NextResponse.json({ error: "ไม่พบสี" }, { status: 404 });

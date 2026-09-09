@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { requireRole, managerAllowedBrandIds } from "@/lib/authz";
+import { requirePerm, managerAllowedBrandIds } from "@/lib/authz";
+import { audit } from "@/lib/audit";
 
 // Vehicle model master. ?brandId= narrows to a brand (lead form), ?all=1
 // includes inactive (settings page).
@@ -25,7 +26,7 @@ export async function GET(request: NextRequest) {
 // they actually have branch access to — checked server-side, not just hidden
 // in the UI, since /settings/models is now reachable by role=manager.
 export async function POST(request: NextRequest) {
-  const rq = await requireRole(["admin", "gm", "manager"]);
+  const rq = await requirePerm("settings-models", "add");
   if (!rq.ok) return rq.response;
 
   const b = (await request.json().catch(() => ({}))) as Record<string, unknown>;
@@ -43,5 +44,6 @@ export async function POST(request: NextRequest) {
       modelCode: typeof b.modelCode === "string" ? b.modelCode.trim() || null : null,
     },
   });
+  audit({ action: "settings.update", entityType: "model", entityId: row.modelId, after: { brandId: row.brandId, modelName: row.modelName, modelCode: row.modelCode }, detail: "create" });
   return NextResponse.json({ ok: true, modelId: row.modelId }, { status: 201 });
 }

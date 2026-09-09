@@ -1,14 +1,18 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { requireRole } from "@/lib/authz";
+import { requirePerm } from "@/lib/authz";
+import { audit } from "@/lib/audit";
 
 export async function GET() {
   const rows = await prisma.channelConfig.findMany({ orderBy: [{ brand: "asc" }, { branchCode: "asc" }] });
   return NextResponse.json(rows);
 }
 
+// Gated by the settings-channels menu flags (user req 2026-09-09) — a
+// non-admin can now be granted this page's write access per user instead of
+// the old hard admin/gm role check.
 export async function POST(request: NextRequest) {
-  const rq = await requireRole(["admin", "gm"]);
+  const rq = await requirePerm("settings-channels", "add");
   if (!rq.ok) return rq.response;
 
   const b = (await request.json()) as Record<string, unknown>;
@@ -29,6 +33,7 @@ export async function POST(request: NextRequest) {
         active: b.active === 0 ? 0 : 1,
       },
     });
+    audit({ action: "settings.update", entityType: "channel", entityId: row.configId, after: { fbPageId: row.fbPageId, fbPageName: row.fbPageName, brand: row.brand, branchCode: row.branchCode, active: row.active }, detail: "create" });
     return NextResponse.json(row, { status: 201 });
   } catch (e) {
     // P2002 = fb_page_id already mapped — surface a friendly message.

@@ -4,6 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { verifyLineSignature, lineReply } from "@/lib/lineAuth";
 import { handleSlaPostback, type PostbackAction } from "@/lib/governance";
 import { resolveLineCreds } from "@/lib/lineConfig";
+import { audit } from "@/lib/audit";
 import { WELCOME_MARKER_PREFIX, buildWelcomeMessages, logWelcomeToChat, deliverWelcomeByPush } from "@/lib/welcome";
 
 const OWNER_SWITCH_ACTIONS = new Set(["keep_owner", "switch_owner"]);
@@ -66,6 +67,7 @@ export async function POST(request: NextRequest) {
       console.warn("[line webhook] no channel secret resolved (destination unmatched and LINE_CHANNEL_SECRET not set) — postbacks are NOT verified.");
     }
     if (channelSecret && !sigOk) {
+      audit({ action: "webhook.rejected", source: "webhook", actor: null, req: request, result: "denied", entityType: "line_webhook", detail: `bad signature, ${postbacks.length} postback(s)` });
       return NextResponse.json({ ok: false, error: "bad signature" }, { status: 401 });
     }
 

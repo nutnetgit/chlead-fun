@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { requireRole, managerAllowedBranchIds } from "@/lib/authz";
+import { requirePerm, branchScopeFor } from "@/lib/authz";
 
 /**
  * Manager dashboard v2 (user req 2026-07-11, brainstormed layout): every
@@ -17,7 +17,7 @@ import { requireRole, managerAllowedBranchIds } from "@/lib/authz";
 const DAY = 24 * 60 * 60 * 1000;
 
 export async function GET(req: Request) {
-  const rq = await requireRole(["manager", "gm", "admin"]);
+  const rq = await requirePerm("dashboard");
   if (!rq.ok) return rq.response;
 
   // Branch scoping (bug found 2026-07-14: every query here was completely
@@ -25,13 +25,9 @@ export async function GET(req: Request) {
   // numbers from brands/branches they don't manage at all, which is why the
   // "HOT ค้างเกิน 7 วัน" count didn't reconcile with Lead Center's own list,
   // itself already properly branch-scoped). admin/gm stay global; a manager
-  // with no branch links falls back to everything (same graceful rule used
-  // everywhere else in the app).
-  let branchScope: number[] | null = null;
-  if (rq.role === "manager") {
-    const allowed = await managerAllowedBranchIds(rq.funUserId!);
-    if (allowed.length) branchScope = allowed;
-  }
+  // holding dashboard·viewall is global too; a manager with no branch links
+  // falls back to everything (same graceful rule used everywhere else).
+  const branchScope = await branchScopeFor(rq, "dashboard", rq.perms);
 
   // Brand filter (user req 2026-07-14, same class of bug as Run Rate's
   // pre-rework "combined" view: a rep who sells more than one brand made the

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { requireRole } from "@/lib/authz";
+import { requirePerm } from "@/lib/authz";
+import { audit } from "@/lib/audit";
 
 // Branch directory (per brand). ?all=1 includes deactivated.
 export async function GET(request: NextRequest) {
@@ -26,7 +27,7 @@ export async function GET(request: NextRequest) {
 
 // Create branch. Body: { branchName, branchCode?, brandId?, companyNameFull?, companyAddress? }
 export async function POST(request: NextRequest) {
-  const rq = await requireRole(["admin", "gm"]);
+  const rq = await requirePerm("settings", "add");
   if (!rq.ok) return rq.response;
 
   const b = (await request.json().catch(() => ({}))) as Record<string, unknown>;
@@ -43,6 +44,7 @@ export async function POST(request: NextRequest) {
         companyAddress: typeof b.companyAddress === "string" ? b.companyAddress.trim() || null : null,
       },
     });
+    audit({ action: "settings.update", entityType: "branch", entityId: row.branchId, branchId: row.branchId, after: { branchName: row.branchName, branchCode: row.branchCode, brandId: row.brandId }, detail: "create" });
     return NextResponse.json({ ok: true, branchId: row.branchId }, { status: 201 });
   } catch (e) {
     const msg = String(e).includes("P2002") ? "รหัสสาขานี้ถูกใช้แล้ว" : "บันทึกไม่สำเร็จ";

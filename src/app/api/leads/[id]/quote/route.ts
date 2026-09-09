@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import crypto from "crypto";
 import { prisma } from "@/lib/prisma";
-import { requireRole } from "@/lib/authz";
+import { requireRole, requirePerm } from "@/lib/authz";
 import { getFeatureFlags } from "@/lib/settings";
 
 type Ctx = { params: Promise<{ id: string }> };
@@ -49,7 +49,7 @@ export async function GET(_request: NextRequest, { params }: Ctx) {
 }
 
 export async function POST(request: NextRequest, { params }: Ctx) {
-  const rq = await requireRole(["sales", "manager", "gm", "admin"]);
+  const rq = await requirePerm("leads", "edit");
   if (!rq.ok) return rq.response;
 
   const flags = await getFeatureFlags();

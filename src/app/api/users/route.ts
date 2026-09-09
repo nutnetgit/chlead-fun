@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireRole } from "@/lib/authz";
+import { audit } from "@/lib/audit";
+import { resolvePerms } from "@/lib/menuAccess";
 
 const VALID_ROLES = new Set(["sales", "manager", "gm", "admin"]);
 
@@ -10,31 +12,29 @@ export async function GET(request: NextRequest) {
   const all = request.nextUrl.searchParams.get("all") === "1";
   const users = await prisma.funUser.findMany({
     where: all ? {} : { isActive: 1 },
-    include: { branchLinks: true },
+    include: { branchLinks: true, menuRows: true },
     orderBy: [{ role: "asc" }, { displayName: "asc" }],
   });
   return NextResponse.json(users.map((u) => ({
     userId: u.userId, displayName: u.displayName, nickname: u.nickname, phone: u.phone,
     role: u.role, branchId: u.branchId, teamId: u.teamId, lineUserid: u.lineUserid,
+    dmsUserId: u.dmsUserId,
     isActive: !!u.isActive,
     approved: !!u.approvedAt,
     pictureUrl: u.pictureUrl,
     branchIds: u.branchLinks.map((b) => b.branchId),
     username: u.username,
     hasPassword: !!u.passwordHash,
-    // Raw per-user menu overrides (null = role defaults) — the settings
-    // editor needs the overrides themselves, not just the effective list.
-    menuAccess: parseMenuAccess(u.menuAccess),
+    // Explicit per-user permission rows (null = role defaults) — the settings
+    // editor needs to know whether the user has been customised.
+    perms: u.menuRows.length ? resolvePerms(u.role, u.menuRows) : null,
+    // Still on the pre-032 JSON overrides → the migrate button in /settings/users.
+    legacyMenuAccess: !!u.menuAccess,
   })));
 }
 
-function parseMenuAccess(raw: string | null): Record<string, boolean> | null {
-  if (!raw) return null;
-  try { return JSON.parse(raw) as Record<string, boolean>; } catch { return null; }
-}
-
 // Create user. Body: { displayName, nickname?, role, branchId? (home),
-// lineUserid?, branchIds?: number[] (allowed branches) }
+// lineUserid?, dmsUserId?, branchIds?: number[] (allowed branches) }
 export async function POST(request: NextRequest) {
   const rq = await requireRole(["admin", "gm"]);
   if (!rq.ok) return rq.response;
@@ -46,19 +46,26 @@ export async function POST(request: NextRequest) {
   const role = String(b.role ?? "sales");
   if (!VALID_ROLES.has(role)) return NextResponse.json({ error: "invalid role" }, { status: 400 });
 
-  const user = await prisma.funUser.create({
-    data: {
-      displayName: b.displayName.trim(),
-      nickname: typeof b.nickname === "string" ? b.nickname.trim() || null : null,
-      phone: typeof b.phone === "string" ? b.phone.trim() || null : null,
-      role: role as never,
-      branchId: typeof b.branchId === "number" ? b.branchId : null,
-      lineUserid: typeof b.lineUserid === "string" ? b.lineUserid.trim() || null : null,
-    },
-  });
+  const data = {
+    displayName: b.displayName.trim(),
+    nickname: typeof b.nickname === "string" ? b.nickname.trim() || null : null,
+    phone: typeof b.phone === "string" ? b.phone.trim() || null : null,
+    role: role as never,
+    branchId: typeof b.branchId === "number" ? b.branchId : null,
+    lineUserid: typeof b.lineUserid === "string" ? b.lineUserid.trim() || null : null,
+    dmsUserId: Number.isInteger(b.dmsUserId) ? (b.dmsUserId as number) : null,
+  };
+  let user;
+  try {
+    user = await prisma.funUser.create({ data });
+  } catch (e) {
+    const msg = String(e).includes("uk_user_dms") ? "รหัสผู้ใช้ SPS นี้ถูกผูกกับบัญชีอื่นแล้ว" : "สร้างผู้ใช้ไม่สำเร็จ";
+    return NextResponse.json({ error: msg }, { status: 409 });
+  }
   const branchIds = Array.isArray(b.branchIds) ? b.branchIds.filter((x) => Number.isInteger(x)) : [];
   if (branchIds.length) {
     await prisma.userBranch.createMany({ data: branchIds.map((branchId) => ({ userId: user.userId, branchId: branchId as number })) });
   }
+  audit({ action: "user.create", entityType: "user", entityId: user.userId, after: { ...data, branchIds } });
   return NextResponse.json({ ok: true, userId: user.userId }, { status: 201 });
 }

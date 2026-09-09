@@ -1,7 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSetting, setSetting, getConversionRateConfig } from "@/lib/settings";
-import { requireRole, managerAllowedBranchIds } from "@/lib/authz";
+import { requirePerm, managerAllowedBranchIds } from "@/lib/authz";
+import { hasPerm } from "@/lib/menuAccess";
+import { audit } from "@/lib/audit";
 
 export const runtime = "nodejs";
 
@@ -55,7 +57,7 @@ function sumTarget(perUser: Record<string, number>, ownerId: number | null, bran
 }
 
 export async function GET(request: NextRequest) {
-  const rq = await requireRole(["sales", "manager", "gm", "admin"]);
+  const rq = await requirePerm("runrate");
   if (!rq.ok) return rq.response;
 
   // sales role is forced to their own scope regardless of the query param
@@ -73,7 +75,7 @@ export async function GET(request: NextRequest) {
   // Lead Center) — their "team" numbers mean THEIR branches, not the whole
   // group. admin/gm stay global; no links → graceful fallback.
   let branchScope: number[] | null = null;
-  if (rq.role === "manager" || rq.role === "sales") {
+  if ((rq.role === "manager" && !hasPerm(rq.perms, "runrate", "viewall")) || rq.role === "sales") {
     const allowed = await managerAllowedBranchIds(rq.funUserId!);
     if (allowed.length) branchScope = allowed;
   }
@@ -239,10 +241,11 @@ export async function GET(request: NextRequest) {
 // into the existing config (doesn't replace unrelated brand/user entries a
 // different manager or a different brand-filtered save already set).
 export async function PUT(request: NextRequest) {
-  const rq = await requireRole(["manager", "gm", "admin"]);
+  const rq = await requirePerm("runrate", "edit");
   if (!rq.ok) return rq.response;
 
   const b = (await request.json().catch(() => ({}))) as Cfg;
+  audit({ action: "settings.update", entityType: "runrate_targets", after: b.perUser ?? {} });
   const incoming = typeof b.perUser === "object" && b.perUser ? b.perUser : {};
 
   // A manager may only write entries for users within their own branches —

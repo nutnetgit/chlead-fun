@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { requireRole, managerAllowedBrandIds } from "@/lib/authz";
+import { requireRole, requirePerm, managerAllowedBrandIds } from "@/lib/authz";
+import { audit } from "@/lib/audit";
 
 // SLA rule settings (user req 2026-07-14 — flagged 2026-07-14 as "the next
 // thing to build" after the Dashboard SLA explainer went in: fun_sla_rule
@@ -75,10 +76,11 @@ function toIntOrNull(v: unknown): number | null | undefined {
 }
 
 export async function POST(request: NextRequest) {
-  const rq = await requireRole(["manager", "gm", "admin"]);
+  const rq = await requirePerm("settings-sla-rules", "add");
   if (!rq.ok) return rq.response;
 
   const b = (await request.json().catch(() => ({}))) as Record<string, unknown>;
+  audit({ action: "settings.update", entityType: "sla_rule", after: b, detail: "create" });
 
   const applyTemperature = typeof b.applyTemperature === "string" && VALID_TEMPS.includes(b.applyTemperature) ? b.applyTemperature : "any";
   if (b.applyChannelCategory !== null && b.applyChannelCategory !== undefined && !VALID_CHANNELS.includes(String(b.applyChannelCategory))) {

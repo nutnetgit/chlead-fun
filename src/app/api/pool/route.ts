@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { requireRole, managerAllowedBranchIds } from "@/lib/authz";
+import { requirePerm, managerAllowedBranchIds } from "@/lib/authz";
+import { hasPerm } from "@/lib/menuAccess";
 
 // Unclaimed fun_lead_pool entries, hot-first (handoff §5: "hot ใน pool แจกต่อใน 24 ชม.").
 // Branch-scoped (user req 2026-07-14): manager AND sales only see pool leads
@@ -8,11 +9,11 @@ import { requireRole, managerAllowedBranchIds } from "@/lib/authz";
 // out of the Ford pool. admin/gm see everything; a user with no branch links
 // at all falls back to everything (same graceful rule as the QR modal).
 export async function GET() {
-  const rq = await requireRole(["sales", "manager", "gm", "admin"]);
+  const rq = await requirePerm("pool");
   if (!rq.ok) return rq.response;
 
   let branchScope: number[] | null = null;
-  if (rq.role === "sales" || rq.role === "manager") {
+  if ((rq.role === "sales" || rq.role === "manager") && !hasPerm(rq.perms, "pool", "viewall")) {
     const allowed = await managerAllowedBranchIds(rq.funUserId!);
     if (allowed.length) branchScope = allowed;
   }
