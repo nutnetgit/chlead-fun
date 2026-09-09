@@ -12,7 +12,7 @@ import { Sun, Moon, Lock } from "lucide-react";
 import { Sidebar, UserRow } from "@/components/Sidebar";
 import { ForcePasswordChange } from "@/components/ForcePasswordChange";
 import { menuKeyForPath } from "@/lib/menuAccess";
-import { BranchSwitcher } from "@/components/BranchPicker";
+import { BranchBadge } from "@/components/BranchPicker";
 
 export type Me = {
   authEnabled: boolean;
@@ -112,7 +112,7 @@ export function Chrome({ children }: { children: React.ReactNode }) {
               <div className="hidden lg:block" />
 
               <div className="flex items-center gap-2">
-                {me?.user && <BranchSwitcher me={me} onSwitched={refreshMe} />}
+                {me?.user && <BranchBadge me={me} />}
                 <button onClick={toggleTheme} title={dark ? "โหมดสว่าง" : "โหมดมืด"}
                   className="p-2 rounded-[10px] border border-[var(--border)] bg-[var(--surface)] text-[var(--text-2)] hover:text-[var(--text)] transition">
                   {dark ? <Sun size={15} /> : <Moon size={15} />}

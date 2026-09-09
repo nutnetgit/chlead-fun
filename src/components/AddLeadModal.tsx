@@ -14,6 +14,19 @@ type SourceRow = { channelId: number; channelName: string; category: string; isA
 
 const inputCls = "w-full px-3 py-2 text-sm bg-white border border-[var(--border-2)] rounded-lg focus:outline-none focus:ring-1 focus:ring-[var(--primary)]";
 
+// Last branch this browser filed a lead under — the whole reason the header
+// branch switcher could go away: a multi-branch user picks their branch once
+// and the form keeps offering it. Per-browser convenience only; the server
+// still re-checks the branch against the user's scope on POST.
+const LAST_BRANCH_KEY = "fun_last_lead_branch";
+function lastBranchId(): number {
+  if (typeof window === "undefined") return 0;
+  try { return Number(window.localStorage.getItem(LAST_BRANCH_KEY)) || 0; } catch { return 0; }
+}
+function rememberBranch(branchId: string) {
+  try { window.localStorage.setItem(LAST_BRANCH_KEY, branchId); } catch { /* private mode */ }
+}
+
 // Grouped like /settings/sources itself (user req 2026-07-13: this dropdown
 // used to be 5 hardcoded options unrelated to the real channel list an admin
 // manages there — now it reads the same fun_source_channel rows, grouped
@@ -85,11 +98,14 @@ export function AddLeadModal({ onClose, onCreated }: { onClose: () => void; onCr
     [visibleBranches, f.brandId],
   );
 
-  // Default to the branch the user is currently working as (header switcher,
-  // user req 2026-09-09 — CPT parity) until they pick something themselves.
+  // Pre-fill brand+branch: the branch this user filed a lead under last
+  // time, else the branch they belong to (user req 2026-09-09 — replaces the
+  // header branch switcher, which was removed as redundant with the brand
+  // chips and the per-page "ทุกสาขา" filter). Never overrides a manual pick.
   useEffect(() => {
-    if (f.brandId || f.branchId || !me?.activeBranchId) return;
-    const b = visibleBranches.find((x) => x.branchId === me.activeBranchId);
+    if (f.brandId || f.branchId || !visibleBranches.length) return;
+    const wanted = Number(lastBranchId()) || me?.activeBranchId || 0;
+    const b = visibleBranches.find((x) => x.branchId === wanted);
     if (b) setF((prev) => ({ ...prev, brandId: b.brandId ? String(b.brandId) : "", branchId: String(b.branchId) }));
   }, [me, visibleBranches]); // eslint-disable-line react-hooks/exhaustive-deps
   const selectedModel = models.find((m) => m.modelId === Number(f.modelId));
@@ -110,7 +126,7 @@ export function AddLeadModal({ onClose, onCreated }: { onClose: () => void; onCr
     });
     const d = await res.json().catch(() => ({}));
     setSaving(false);
-    if (res.ok) onCreated(d.leadId, !!d.reopen);
+    if (res.ok) { rememberBranch(f.branchId); onCreated(d.leadId, !!d.reopen); }
     else setError(d.error ?? "บันทึกไม่สำเร็จ");
   }
 
