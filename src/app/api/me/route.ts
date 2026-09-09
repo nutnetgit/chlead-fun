@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { auth, authEnabled } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { resolvePerms, roleDefaultPerms } from "@/lib/menuAccess";
-import { visibleBranches } from "@/lib/authz";
+import { getActiveBranchContext, otherSystems } from "@/lib/activeBranch";
 
 export const runtime = "nodejs";
 
@@ -24,14 +24,15 @@ export async function GET() {
   // `perms` drives per-button visibility. Server routes re-check via requirePerm.
   // Admin is never restricted by rows (same rule as requirePerm).
   const perms = fu.role === "admin" ? roleDefaultPerms("admin") : resolvePerms(fu.role, fu.menuRows);
-  // Branches this user may pick in the header badge / page BranchPicker
-  // (user req 2026-09-09, CPT parity).
-  const branches = await visibleBranches(fu.userId, fu.role);
+  // Working branch + the branches this user may switch to / filter by
+  // (user req 2026-09-09, CPT parity — see src/lib/activeBranch.ts).
+  const { activeBranchId, activeBranchName, branches } = await getActiveBranchContext(fu.userId, fu.role, fu.branchId);
 
   return NextResponse.json({
     authEnabled: true,
     signedIn: true,
     spsSso: !!process.env.SPS_SSO_LANDING_URL,
+    systems: otherSystems(),
     user: {
       funUserId: fu.userId,
       displayName: fu.displayName,
@@ -46,6 +47,8 @@ export async function GET() {
       menus: Object.keys(perms),
       perms,
       branches,
+      activeBranchId,
+      activeBranchName,
     },
   });
 }

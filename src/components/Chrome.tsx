@@ -12,7 +12,7 @@ import { Sun, Moon, Lock } from "lucide-react";
 import { Sidebar, UserRow } from "@/components/Sidebar";
 import { ForcePasswordChange } from "@/components/ForcePasswordChange";
 import { menuKeyForPath } from "@/lib/menuAccess";
-import { BranchBadge } from "@/components/BranchPicker";
+import { BranchSwitcher } from "@/components/BranchPicker";
 
 export type Me = {
   authEnabled: boolean;
@@ -25,11 +25,16 @@ export type Me = {
     // button visibility; the server re-checks via requirePerm.
     perms?: Partial<Record<string, Record<string, boolean>>>;
     dmsUserId?: number | null;
-    // Branches this user may view/pick (header badge + BranchPicker).
+    // Branches this user may view/pick (header switcher + BranchPicker), and
+    // the one they're currently working as (cookie, src/lib/activeBranch.ts).
     branches?: { branchId: number; branchName: string; brandName: string | null }[];
+    activeBranchId?: number | null;
+    activeBranchName?: string | null;
   };
   // SPS_SSO_LANDING_URL is set → the "เปิดใบจองใน SPS" button is offered.
   spsSso?: boolean;
+  // "สลับไประบบอื่นของ ช.เอราวัณ" links for the user menu.
+  systems?: { name: string; href: string; note: string }[];
 };
 
 const MeContext = createContext<Me | null>(null);
@@ -107,7 +112,7 @@ export function Chrome({ children }: { children: React.ReactNode }) {
               <div className="hidden lg:block" />
 
               <div className="flex items-center gap-2">
-                {me?.user && <BranchBadge me={me} />}
+                {me?.user && <BranchSwitcher me={me} onSwitched={refreshMe} />}
                 <button onClick={toggleTheme} title={dark ? "โหมดสว่าง" : "โหมดมืด"}
                   className="p-2 rounded-[10px] border border-[var(--border)] bg-[var(--surface)] text-[var(--text-2)] hover:text-[var(--text)] transition">
                   {dark ? <Sun size={15} /> : <Moon size={15} />}

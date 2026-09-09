@@ -37,12 +37,12 @@ export function AddLeadModal({ onClose, onCreated }: { onClose: () => void; onCr
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const [me, setMe] = useState<{ role: string; funUserId: number } | null>(null);
+  const [me, setMe] = useState<{ role: string; funUserId: number; activeBranchId: number | null } | null>(null);
 
   useEffect(() => {
     fetch("/api/branches").then((r) => r.json()).then((d) => { setBrands(d.brands); setBranches(d.branches); });
     fetch("/api/users").then((r) => r.json()).then(setUsers);
-    fetch("/api/me").then((r) => r.json()).then((d) => { if (d.user) setMe({ role: d.user.role, funUserId: d.user.funUserId }); });
+    fetch("/api/me").then((r) => r.json()).then((d) => { if (d.user) setMe({ role: d.user.role, funUserId: d.user.funUserId, activeBranchId: d.user.activeBranchId ?? null }); });
     fetch("/api/sources").then((r) => r.json()).then((rows: SourceRow[]) => {
       setSources(rows);
       const firstActive = rows.find((s) => s.isActive && SHOWROOM_CATEGORIES.includes(s.category));
@@ -84,6 +84,14 @@ export function AddLeadModal({ onClose, onCreated }: { onClose: () => void; onCr
     () => visibleBranches.filter((b) => !f.brandId || b.brandId === Number(f.brandId) || b.brandId === null),
     [visibleBranches, f.brandId],
   );
+
+  // Default to the branch the user is currently working as (header switcher,
+  // user req 2026-09-09 — CPT parity) until they pick something themselves.
+  useEffect(() => {
+    if (f.brandId || f.branchId || !me?.activeBranchId) return;
+    const b = visibleBranches.find((x) => x.branchId === me.activeBranchId);
+    if (b) setF((prev) => ({ ...prev, brandId: b.brandId ? String(b.brandId) : "", branchId: String(b.branchId) }));
+  }, [me, visibleBranches]); // eslint-disable-line react-hooks/exhaustive-deps
   const selectedModel = models.find((m) => m.modelId === Number(f.modelId));
 
   async function save() {

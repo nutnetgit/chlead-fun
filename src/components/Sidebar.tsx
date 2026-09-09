@@ -11,7 +11,7 @@ import { signOut } from "next-auth/react";
 import {
   KanbanSquare, Inbox, LayoutDashboard, Users, Store, Share2, Activity, Menu, X,
   Car, ListChecks, CalendarRange, TrendingUp, FileBarChart, ScrollText, Workflow,
-  LogOut, KeyRound, ChevronDown, MapPin, UsersRound, FileText, UserCog, MessageCircle, Timer,
+  LogOut, KeyRound, ChevronDown, MapPin, UsersRound, FileText, UserCog, MessageCircle, Timer, ExternalLink,
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import type { Me } from "@/components/Chrome";
@@ -56,7 +56,7 @@ export function UserRow({ me, variant = "header", onSaved }: { me: Me; variant?:
         <ChevronDown size={13} className={`text-[var(--text-3)] shrink-0 ${nameBlockCls}`} />
       </button>
       {open && (
-        <div className={`absolute top-[calc(100%+4px)] bg-[var(--surface)] border border-[var(--border)] rounded-[14px] shadow-[var(--shadow)] py-1.5 z-30 min-w-[10rem] ${variant === "header" ? "right-0" : "left-0 right-0"}`}>
+        <div className={`absolute top-[calc(100%+4px)] bg-[var(--surface)] border border-[var(--border)] rounded-[14px] shadow-[var(--shadow)] py-1.5 z-30 min-w-[14rem] ${variant === "header" ? "right-0" : "left-0 right-0"}`}>
           <button onClick={() => { setEditing(true); setOpen(false); }}
             className="w-full flex items-center gap-2.5 px-3.5 py-2 text-[.82rem] text-[var(--text-2)] hover:bg-[var(--surface-2)] hover:text-[var(--text)] transition">
             <UserCog size={15} /> แก้ไขโปรไฟล์
@@ -64,6 +64,23 @@ export function UserRow({ me, variant = "header", onSaved }: { me: Me; variant?:
           <a href="/account/password" className="flex items-center gap-2.5 px-3.5 py-2 text-[.82rem] text-[var(--text-2)] hover:bg-[var(--surface-2)] hover:text-[var(--text)] transition">
             <KeyRound size={15} /> เปลี่ยนรหัสผ่าน
           </a>
+          {/* "สลับไประบบอื่น" lives here next to logout (user req 2026-09-09,
+              CPT user-menu.tsx parity — the legacy SPS reveals its program
+              switcher on the LOGOUT button, so staff expect it in this spot).
+              Opens a new tab; SPS has no lead-less SSO yet, so it re-asks login. */}
+          {(me.systems?.length ?? 0) > 0 && (
+            <>
+              <div className="h-px bg-[var(--border)] my-1.5" />
+              <div className="px-3.5 pb-1 text-[10px] text-[var(--text-3)]">สลับไประบบอื่นของ ช.เอราวัณ</div>
+              {me.systems!.map((s) => (
+                <a key={s.href + s.name} href={s.href} target="_blank" rel="noreferrer"
+                  className="flex items-center justify-between gap-2.5 px-3.5 py-2 text-[.82rem] text-[var(--text-2)] hover:bg-[var(--surface-2)] hover:text-[var(--text)] transition">
+                  <span className="flex items-center gap-2.5"><ExternalLink size={15} /> {s.name}</span>
+                  <span className="text-[10px] text-[var(--text-3)]">{s.note} ↗</span>
+                </a>
+              ))}
+            </>
+          )}
           <div className="h-px bg-[var(--border)] my-1.5" />
           <button onClick={() => signOut({ callbackUrl: "/login" })} className="w-full flex items-center gap-2.5 px-3.5 py-2 text-[.82rem] text-[var(--red)] hover:bg-[var(--red-soft)] transition">
             <LogOut size={15} /> ออกจากระบบ
