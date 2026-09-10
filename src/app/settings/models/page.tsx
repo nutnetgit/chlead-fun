@@ -1,18 +1,22 @@
 "use client";
 
-// Vehicle model/color master — replaces the old flow where model data lived in
-// SPS only. Managed here for now; a future read-only SPS sync (once approved)
-// will match rows via dms_model_id/dms_color_id instead of manual re-keying.
+// Vehicle model/color master. Since 2026-09-10 the rows are mirrored from
+// SPS's own catalogue (stock_model_main / stock_color) by the nightly 02:00
+// sync — those rows carry dms ids, show a "จาก SPS" tag and are read-only
+// here, because editing them would be undone on the next run. Rows typed in
+// by hand stay fully editable. See src/lib/jobs/dmsCatalogSync.ts.
 
 import { useEffect, useState } from "react";
-import { Plus, Loader2, X, Pencil, Trash2 } from "lucide-react";
+import { Plus, Loader2, X, Pencil, Trash2, RefreshCw } from "lucide-react";
 import { Card, Toggle, inputCls } from "@/components/ui";
 import { SettingsShell } from "@/components/SettingsShell";
 import { useMe } from "@/components/Chrome";
 
 type BrandRow = { brandId: number; brandName: string };
-type ColorRow = { colorId: number; colorName: string; isActive: boolean };
-type ModelRow = { modelId: number; brandId: number; modelName: string; modelCode: string | null; isActive: boolean; colors: ColorRow[] };
+type ColorRow = { colorId: number; colorName: string; colorCode: string | null; isActive: boolean; fromSps: boolean };
+type ModelRow = { modelId: number; brandId: number; modelName: string; modelCode: string | null; isActive: boolean; fromSps: boolean; colors: ColorRow[] };
+type SyncBrand = { brand: string; models: { created: number; updated: number; deactivated: number }; colors: { created: number; updated: number; deactivated: number; orphans: number } };
+type SyncState = { configured: boolean; reachable?: boolean; error?: string; last?: { at: string; brands: SyncBrand[] } | null };
 type BranchRow = { branchId: number; brandId: number | null };
 type UserRow = { userId: number; branchIds: number[] };
 
@@ -87,6 +91,25 @@ export default function ModelsPage() {
     if (brandId) load(brandId);
   }
 
+  // ── SPS catalogue sync (user req 2026-09-10) ────────────────────────
+  const [sync, setSync] = useState<SyncState | null>(null);
+  const [syncing, setSyncing] = useState(false);
+  const [syncMsg, setSyncMsg] = useState<string | null>(null);
+  const loadSync = () => fetch("/api/models/sync").then((r) => (r.ok ? r.json() : null)).then(setSync).catch(() => {});
+  useEffect(() => { loadSync(); }, []);
+  async function runSync() {
+    setSyncing(true); setSyncMsg(null);
+    const res = await fetch("/api/models/sync", { method: "POST" });
+    const d = await res.json().catch(() => ({}));
+    setSyncing(false);
+    if (!res.ok) { setSyncMsg(d.error ?? "ซิงก์ไม่สำเร็จ"); return; }
+    const list: SyncBrand[] = d.brands ?? [];
+    const sum = (f: (x: SyncBrand) => number) => list.reduce((a, x) => a + f(x), 0);
+    setSyncMsg(`ซิงก์แล้ว ${list.length} ยี่ห้อ · รุ่น เพิ่ม ${sum((x) => x.models.created)} แก้ ${sum((x) => x.models.updated)} ปิด ${sum((x) => x.models.deactivated)} · สี เพิ่ม ${sum((x) => x.colors.created)} แก้ ${sum((x) => x.colors.updated)} ปิด ${sum((x) => x.colors.deactivated)}`);
+    loadSync();
+    if (brandId) load(brandId);
+  }
+
   async function toggleColor(c: ColorRow) {
     await fetch(`/api/colors/${c.colorId}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ isActive: !c.isActive }) });
     if (brandId) load(brandId);
@@ -97,8 +120,25 @@ export default function ModelsPage() {
     <div className="space-y-4">
       <div>
         <h1 className="text-[1.5rem]">รุ่นรถและสี</h1>
-        <p className="text-[var(--text-2)] text-[.9rem]">Master สำหรับฟอร์มเพิ่ม Lead — เพิ่มรุ่นใหม่ที่นี่เมื่อแบรนด์เปิดตัว (อนาคตจะ sync อัตโนมัติจาก SPS เมื่อเปิดสิทธิ์อ่าน)</p>
+        <p className="text-[var(--text-2)] text-[.9rem]">Master สำหรับฟอร์มเพิ่ม Lead — รุ่นและสีที่มีป้าย “จาก SPS” ดึงมาจากระบบขายอัตโนมัติทุกคืน ต้องแก้ที่ SPS · รุ่นที่เพิ่มเองที่นี่แก้ได้ตามปกติ</p>
       </div>
+
+      <Card title="ซิงก์รุ่นและสีจาก SPS">
+        <div className="flex flex-wrap items-center gap-3">
+          <button onClick={runSync} disabled={syncing || sync?.configured === false}
+            className="flex items-center gap-2 px-3.5 py-2 rounded-lg text-sm font-medium bg-[var(--primary)] text-white hover:bg-[var(--accent-text)] disabled:opacity-50">
+            {syncing ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />} ซิงก์ตอนนี้
+          </button>
+          <span className="text-[.76rem] text-[var(--text-2)]">
+            {sync === null ? "…"
+              : !sync.configured ? "ยังไม่ได้ตั้งค่าการเชื่อมฐาน SPS — ใส่ DMS_MYSQL_URL แล้วรีสตาร์ต"
+              : sync.reachable === false ? `ต่อฐาน SPS ไม่ได้: ${sync.error ?? ""}`
+              : sync.last ? `ซิงก์อัตโนมัติทุกคืน 02:00 · ครั้งล่าสุด ${new Date(sync.last.at).toLocaleString("th-TH")}`
+              : "ต่อฐาน SPS ได้แล้ว · ยังไม่เคยซิงก์"}
+          </span>
+        </div>
+        {syncMsg && <p className="text-[.76rem] text-[var(--text-2)]">{syncMsg}</p>}
+      </Card>
 
       <div className="flex flex-wrap gap-2">
         {brands.map((b) => (
@@ -118,19 +158,28 @@ export default function ModelsPage() {
             {models.map((m) => (
               <div key={m.modelId} className={`border border-[var(--border)] rounded-xl p-4 ${!m.isActive ? "opacity-50" : ""}`}>
                 <div className="flex items-center gap-3 mb-2.5">
-                  <span className="font-medium text-sm flex-1">{m.modelName}{m.modelCode ? <span className="ml-2 text-[.68rem] font-mono bg-[var(--bg)] px-1.5 py-0.5 rounded">{m.modelCode}</span> : null}</span>
+                  <span className="font-medium text-sm flex-1">{m.modelName}{m.modelCode ? <span className="ml-2 text-[.68rem] font-mono bg-[var(--bg)] px-1.5 py-0.5 rounded">{m.modelCode}</span> : null}
+                    {m.fromSps && <span className="ml-2 text-[.62rem] px-1.5 py-0.5 rounded-full bg-[var(--bg)] border border-[var(--border-2)] text-[var(--text-3)] font-normal">จาก SPS</span>}</span>
                   <span className="text-[.68rem] text-[var(--text-3)]">ใช้งาน</span>
-                  <Toggle on={m.isActive} onClick={() => toggleModel(m)} />
-                  <button onClick={() => renameModel(m)} className="p-1.5 rounded hover:bg-[var(--accent-soft)]" title="แก้ไขชื่อ"><Pencil size={14} /></button>
-                  <button onClick={() => removeModel(m)} className="p-1.5 rounded hover:bg-[var(--red-soft)] text-[var(--red)]" title="ลบ (เมื่อยังไม่มี Lead อ้างถึง)"><Trash2 size={14} /></button>
+                  {m.fromSps ? (
+                    <span className="text-[.68rem] text-[var(--text-3)]" title="สถานะนี้ตามระบบขาย SPS">{m.isActive ? "เปิด" : "ปิด"}</span>
+                  ) : (
+                    <>
+                      <Toggle on={m.isActive} onClick={() => toggleModel(m)} />
+                      <button onClick={() => renameModel(m)} className="p-1.5 rounded hover:bg-[var(--accent-soft)]" title="แก้ไขชื่อ"><Pencil size={14} /></button>
+                      <button onClick={() => removeModel(m)} className="p-1.5 rounded hover:bg-[var(--red-soft)] text-[var(--red)]" title="ลบ (เมื่อยังไม่มี Lead อ้างถึง)"><Trash2 size={14} /></button>
+                    </>
+                  )}
                 </div>
                 <div className="flex flex-wrap items-center gap-1.5">
                   {m.colors.map((c) => (
-                    <button key={c.colorId} onClick={() => toggleColor(c)} title={c.isActive ? "กดเพื่อปิดใช้สีนี้" : "กดเพื่อเปิดใช้"}
+                    <button key={c.colorId} onClick={() => { if (!c.fromSps) toggleColor(c); }} disabled={c.fromSps}
+                      title={c.fromSps ? "สีนี้มาจาก SPS — เปิด/ปิดที่ SPS" : c.isActive ? "กดเพื่อปิดใช้สีนี้" : "กดเพื่อเปิดใช้"}
                       className={`text-[.72rem] px-2.5 py-1 rounded-full border inline-flex items-center gap-1 transition ${
                         c.isActive ? "bg-[var(--accent-soft)] border-transparent text-[var(--accent-text)]"
-                          : "bg-[var(--bg)] border-[var(--border-2)] text-[var(--text-3)] line-through"}`}>
-                      {c.colorName}{c.isActive && <X size={10} />}
+                          : "bg-[var(--bg)] border-[var(--border-2)] text-[var(--text-3)] line-through"} ${c.fromSps ? "cursor-default" : ""}`}>
+                      {c.colorCode && <span className="font-mono text-[.62rem] opacity-60">{c.colorCode}</span>}
+                      {c.colorName}{c.isActive && !c.fromSps && <X size={10} />}
                     </button>
                   ))}
                   <input

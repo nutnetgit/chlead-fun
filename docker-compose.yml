@@ -26,6 +26,9 @@ services:
       SPS_SSO_LANDING_URL: ${SPS_SSO_LANDING_URL:-}
       SSO_TICKET_TTL_SEC: ${SSO_TICKET_TTL_SEC:-60}
       AUDIT_RETENTION_DAYS: ${AUDIT_RETENTION_DAYS:-365}
+      # Read-only MySQL account on the SPS/DMS database for the nightly
+      # vehicle-catalogue sync (models + colours). Empty = sync disabled.
+      DMS_MYSQL_URL: ${DMS_MYSQL_URL:-}
       LINE_CHANNEL_ACCESS_TOKEN: ${LINE_CHANNEL_ACCESS_TOKEN:-}
       # Gemini for scoring / nudges / Aira digest+summary (FUN's OWN key).
       GEMINI_API_KEY: ${GEMINI_API_KEY:-}

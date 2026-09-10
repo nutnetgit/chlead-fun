@@ -17,7 +17,9 @@ export async function GET(request: NextRequest) {
   return NextResponse.json(models.map((m) => ({
     modelId: m.modelId, brandId: m.brandId, modelName: m.modelName,
     modelCode: m.modelCode, isActive: !!m.isActive,
-    colors: m.colors.map((c) => ({ colorId: c.colorId, colorName: c.colorName, isActive: !!c.isActive })),
+    // fromSps: mirrored by the catalogue sync, so read-only here.
+    fromSps: m.dmsModelId !== null,
+    colors: m.colors.map((c) => ({ colorId: c.colorId, colorName: c.colorName, colorCode: c.colorCode, isActive: !!c.isActive, fromSps: c.dmsColorId !== null })),
   })));
 }
 

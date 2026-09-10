@@ -5,6 +5,13 @@ import { audit } from "@/lib/audit";
 
 type Ctx = { params: Promise<{ id: string }> };
 
+// Rows mirrored from SPS (dms_model_id / dms_color_id set) are owned there:
+// renaming or deleting one here would be silently undone by the next 02:00
+// catalogue sync, so refuse it and say where to edit instead
+// (user req 2026-09-10, src/lib/jobs/dmsCatalogSync.ts).
+const SPS_OWNED = "รุ่น/สีนี้ซิงก์มาจาก SPS — แก้ไขที่ SPS แล้วระบบจะดึงมาให้เอง";
+
+
 // A manager may only touch a model whose brand they have branch access to
 // (user req 2026-07-12) — checked against the row's actual brandId, not
 // anything client-supplied.
@@ -27,6 +34,10 @@ export async function PUT(request: NextRequest, { params }: Ctx) {
   if (!Number.isInteger(modelId)) return NextResponse.json({ error: "bad id" }, { status: 400 });
   const denied = await assertManagerCanTouch(rq.role, rq.funUserId, modelId);
   if (denied) return denied;
+
+  const model = await prisma.vehicleModel.findUnique({ where: { modelId }, select: { dmsModelId: true } });
+  if (!model) return NextResponse.json({ error: "ไม่พบรุ่น" }, { status: 404 });
+  if (model.dmsModelId !== null) return NextResponse.json({ error: SPS_OWNED }, { status: 409 });
 
   const b = (await request.json().catch(() => ({}))) as Record<string, unknown>;
   const data: Record<string, unknown> = {};
@@ -54,6 +65,9 @@ export async function DELETE(_request: NextRequest, { params }: Ctx) {
   if (!Number.isInteger(modelId)) return NextResponse.json({ error: "bad id" }, { status: 400 });
   const denied = await assertManagerCanTouch(rq.role, rq.funUserId, modelId);
   if (denied) return denied;
+
+  const owned = await prisma.vehicleModel.findUnique({ where: { modelId }, select: { dmsModelId: true } });
+  if (owned?.dmsModelId != null) return NextResponse.json({ error: SPS_OWNED }, { status: 409 });
 
   const leads = await prisma.lead.count({ where: { interestedModelId: modelId } });
   if (leads) {

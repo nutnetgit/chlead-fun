@@ -195,7 +195,7 @@ $u = $res['user'];
 //           . '&pros_id=' . (int)$prosId . '&cus_id=' . (int)$cusId . '&u_id=' . (int)$spsUid);
 ```
 
-### 3.4 ยี่ห้อกับสาขา — SPS สลับยี่ห้อด้วยการสลับ "สาขา"
+### 3.3 ยี่ห้อกับสาขา — SPS สลับยี่ห้อด้วยการสลับ "สาขา"
 
 ตรวจ source ของ SPS แล้ว (`sps/login.php`, `sps/booking_form.php`) พบว่า:
 
@@ -222,7 +222,7 @@ $u = $res['user'];
 4. `login.php` มี `checkIp()` ⇒ ถ้าเรียกจากนอกออฟฟิศต้องปลดที่ `adam_<branch>_config` (`config_code='10'` = `"0"`) หรือใช้ทางที่ตกลงกันไว้ อย่าใช้ `log_backdoor` เป็นทางถาวร
 5. ทุก query ใน SPS ต่อสตริงดิบไม่ escape ⇒ ค่าที่ส่งใน URL ต้อง cast เป็น int ทุกตัวก่อนใช้ (`(int)$_REQUEST['pros_id']` ฯลฯ)
 
-### 3.3 ขาเข้า — เมนู "Lead FUN" ใน SPS
+### 3.4 ขาเข้า — เมนู "Lead FUN" ใน SPS
 
 เมื่อผู้ใช้ที่ login SPS อยู่กดเมนู:
 ```
@@ -237,7 +237,7 @@ Content-Type: application/json
 - ตอบ 404 `USER_UNMAPPED` (ยังไม่มีบัญชี Lead FUN ที่ตรง) · 403 `USER_INACTIVE` · 401 `UNAUTHORIZED`
 - SPS ทำ `header('Location: ' . $res['sso_url'])` ทันที (ticket อายุ 60 วินาที ใช้ได้ครั้งเดียว)
 
-### 3.4 ข้อกำหนดความปลอดภัย
+### 3.5 ข้อกำหนดความปลอดภัย
 
 - `X-Api-Token` เทียบแบบ timing-safe ทั้งสองฝั่ง (`hash_equals()` ใน PHP)
 - ticket ห้าม log แบบเต็ม ห้ามใส่ใน referer ที่หลุดออกนอกระบบ (หน้า `sso_land.php` ควร redirect ทันที)
@@ -257,7 +257,48 @@ Lead FUN บันทึกลง `fun_audit_log` ทุกเหตุการ
 
 ---
 
-## 5. Checklist ทดสอบร่วม
+## 5. ซิงก์รุ่นรถและสี (SPS → Lead FUN)
+
+Lead FUN แสดงรุ่นรถและสีในฟอร์มเพิ่ม Lead และใบเสนอราคา ข้อมูลชุดนี้ **SPS เป็นเจ้าของ** Lead FUN เป็นฝ่ายดึงมาแสดงอย่างเดียว ไม่มีการเขียนกลับ
+
+### 5.1 วิธีเชื่อม
+
+SPS ยังไม่มี API สำหรับรุ่น/สี มีแต่ไฟล์ autocomplete ที่คืน HTML และไม่ตรวจสิทธิ์ จึงใช้วิธีเดียวกับที่โปรเจกต์ CPT ใช้อยู่แล้ว คือ **ต่อ MySQL ของ SPS ตรงๆ ด้วยบัญชี SELECT อย่างเดียว**
+
+สิ่งที่ขอจากฝ่าย IT ครั้งเดียว
+```sql
+CREATE USER 'funcatalog_ro'@'<app-host>' IDENTIFIED BY '<รหัสผ่านที่แข็งแรง>';
+GRANT SELECT ON adam_prod.stock_brand      TO 'funcatalog_ro'@'<app-host>';
+GRANT SELECT ON adam_prod.stock_model_main TO 'funcatalog_ro'@'<app-host>';
+GRANT SELECT ON adam_prod.stock_model      TO 'funcatalog_ro'@'<app-host>';
+GRANT SELECT ON adam_prod.stock_color      TO 'funcatalog_ro'@'<app-host>';
+```
+แล้วใส่ใน `.env` ของ Lead FUN เป็น `DMS_MYSQL_URL="mysql://funcatalog_ro:...@<dms-host>:3306/adam_prod"` · ถ้าเว้นว่าง การซิงก์จะปิดทั้งหมด · โค้ดฝั่งอ่านอยู่ที่ `src/lib/dms/reader.ts` และมีกฎเขียนไว้ในไฟล์ว่า SELECT เท่านั้น
+
+### 5.2 ตารางที่อ่าน และการจับคู่
+
+| SPS | Lead FUN | คีย์จับคู่ |
+|---|---|---|
+| `stock_brand.sto_br_id` | `fun_brand.dms_brand_id` | แอดมินกรอกเองที่ ตั้งค่า › สาขาและแบรนด์ |
+| `stock_model_main` (ชื่อรุ่น 55 รายการ) | `fun_model` | `dms_model_id` = `sto_mo_ma_id` ครั้งแรกจับคู่ด้วยชื่อ |
+| `stock_color` (500 สี ผูกกับชื่อรุ่น+ยี่ห้อ) | `fun_vehicle_color` | `dms_color_id` = `sto_co_id`, `color_code` = `sto_co_code` |
+
+- `stock_model` อ่านเพื่อดูว่าชื่อรุ่นไหนยัง **มีรุ่นย่อยที่ขายอยู่** เท่านั้น ไม่ได้นำรุ่นย่อยหรือราคาเข้ามา
+- สถานะเปิด/ปิดใช้ `st_id` ตามกติกาของ SPS คือ 1 กับ 3 ถือว่าใช้งานอยู่
+- ชื่อสี ใช้ `sto_co_desc_th` ถ้ามี ถ้าไม่มีจะตัดข้อความก่อนวงเล็บของ `sto_co_desc` แบบเดียวกับที่ SPS แสดงเอง
+
+### 5.3 พฤติกรรมที่ตกลงไว้
+
+- ทำงานอัตโนมัติทุกคืนเวลา **02:00** และกดซิงก์เองได้ที่ ตั้งค่า › รุ่นรถและสี
+- **ไม่ลบอะไรทั้งสิ้น** รุ่นหรือสีที่ SPS เลิกขายจะถูกปิดใช้งาน เพราะ Lead และใบเสนอราคาเก่ายังอ้างถึงอยู่
+- รุ่น/สีที่ซิงก์มาจะแก้ชื่อ ลบ หรือเปิดปิดใน Lead FUN ไม่ได้ ต้องแก้ที่ SPS
+- รุ่นที่แอดมินเคยพิมพ์เองไว้ ระบบจะจับคู่ด้วยชื่อให้อัตโนมัติในรอบแรก จะได้ไม่เกิดรายการซ้ำ
+- ยี่ห้อที่ยังไม่ได้กรอกรหัส SPS จะถูกข้าม ไม่ถือเป็นข้อผิดพลาด
+- ทุกรอบบันทึกลง audit log ด้วย action `settings.dms_sync`
+
+---
+
+## 6. Checklist ทดสอบร่วม
 
 - [ ] `curl -H "X-Api-Token: …" https://fun.ch-erawan.com/api/permissions/export` ได้ JSON
 - [ ] import `dryRun: true` ด้วยแถว `user_menu` ตัวอย่าง 1 คน → `matched: 1`, `unknownMenus` ว่าง

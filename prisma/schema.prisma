@@ -374,6 +374,9 @@ model VehicleColor {
   colorId    Int     @id @default(autoincrement()) @map("color_id")
   modelId    Int     @map("model_id")
   colorName  String  @map("color_name") @db.VarChar(50)
+  // Manufacturer colour code from SPS (A2W, 36C …), sql/036 — filled by the
+  // catalogue sync; NULL on colours typed in by hand here.
+  colorCode  String? @map("color_code") @db.VarChar(20)
   isActive   Int?    @default(1) @map("is_active") @db.TinyInt
   dmsColorId Int?    @map("dms_color_id")
 
