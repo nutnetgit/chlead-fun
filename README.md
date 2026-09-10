@@ -97,7 +97,9 @@ Triggers — see `n8n/FUN-WF*.json`):
   (sql/030). Rides the "score" toggle in /settings/automation.
 
 Permissions, audit log and SPS SSO (2026-09-09, sql/032–034 — see
-`docs/SPS_INTEGRATION.md` for the contract handed to the DMS team):
+`docs/SPS_INTEGRATION.md` for the contract handed to the DMS team; **§0 of
+that document is the handover checklist**: who does what, which credentials
+to provision, and which env vars turn each link on):
 - Permissions are per user × per menu with six flags (add / edit / cancel /
   del / report / viewall), the same shape as SPS `user_menu`; a row existing
   = can view, no rows = role defaults (`src/lib/menuAccess.ts`). Every write
@@ -116,6 +118,21 @@ Permissions, audit log and SPS SSO (2026-09-09, sql/032–034 — see
   SPS verifies via `POST /api/sso/verify` with `X-Api-Token`). In — SPS calls
   `POST /api/sso/issue` and sends the browser to `/sso?ticket=`. Identity =
   `line_userid` (same LINE Login channel), fallback `fun_user.dms_user_id`.
+
+SPS vehicle catalogue sync (2026-09-10, sql/035–036 — `docs/SPS_INTEGRATION.md`
+§5): models and colours are owned by SPS. `src/lib/dms/reader.ts` reads
+`stock_model_main` / `stock_color` / `stock_model` over a SELECT-only MySQL
+account (`DMS_MYSQL_URL`, unset = feature off), and
+`src/lib/jobs/dmsCatalogSync.ts` mirrors them into `fun_model` /
+`fun_vehicle_color` at the 02:00 tick, or on demand from
+`POST /api/models/sync`. Matching is by `dms_model_id` / `dms_color_id`,
+adopting hand-typed rows by name on the first run; retired rows are
+deactivated, never deleted, because leads still reference them, and mirrored
+rows are read-only in `/settings/models`. Brands need their SPS id
+(`fun_brand.dms_brand_id`) filled in `/settings/branches` first — the same
+screen holds `fun_branch.dms_branch_id`, which the booking handoff uses to
+tell SPS which showroom to switch into (SPS derives the brand from the
+branch, it has no brand of its own).
 
 Settings UI: `/settings/users` (user + role + flexible multi-branch access —
 `/api/users` CRUD incl. branchIds replacement), `/settings/branches`

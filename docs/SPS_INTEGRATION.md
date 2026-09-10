@@ -1,14 +1,52 @@
 # Ch.Lead FUN ↔ SPS — คู่มือเชื่อมต่อสำหรับทีมพัฒนา DMS (SPS)
 
-ฉบับ 2026-09-09 · เจ้าของระบบ: Nutt (ช.เอราวัณ) · โค้ดอ้างอิง: `src/lib/menuAccess.ts`, `src/lib/sso.ts`, `src/app/api/sso/*`, `src/app/api/permissions/*`
+ฉบับ 2026-09-10 · เจ้าของระบบ: Nutt (ช.เอราวัณ) · โค้ดอ้างอิง: `src/lib/menuAccess.ts`, `src/lib/sso.ts`, `src/lib/dms/reader.ts`, `src/lib/jobs/dmsCatalogSync.ts`, `src/app/api/sso/*`, `src/app/api/permissions/*`
 
 Ch.Lead FUN (`https://fun.ch-erawan.com`) คือระบบติดตาม Lead ก่อนการจอง แทนโมดูล Prospect เดิมใน SPS เอกสารนี้อธิบาย 3 จุดเชื่อมที่ฝั่ง SPS ต้องทำ/รับรู้:
 
 1. **สิทธิ์ผู้ใช้** — Lead FUN เก็บสิทธิ์รูปแบบเดียวกับ `user_menu` ของ SPS (รายเมนู × 6 ธง) และมี API export/import
 2. **ตัวตนผู้ใช้ร่วม** — จับคู่บัญชีด้วย LINE userId (channel เดียวกัน) หรือ `user.u_id`
 3. **SSO 2 ทิศทาง** — ticket ใช้ครั้งเดียว อายุ 60 วินาที + endpoint ตรวจสอบ (รูปแบบเดียวกับที่ CPT/ระบบประกันใช้)
+4. **ซิงก์รุ่นรถและสี** — Lead FUN อ่านแคตตาล็อกของ SPS แบบอ่านอย่างเดียว ไม่ต้องแก้โค้ด SPS
 
 ทุก endpoint ที่ SPS เรียก เป็น **server-to-server เท่านั้น** (PHP → Lead FUN) ห้ามเรียกจาก browser และห้ามใส่ token ใน JavaScript
+
+---
+
+## 0. เริ่มที่นี่ — งานที่ต้องทำเพื่อเปิดการเชื่อมต่อ
+
+ฝั่ง Lead FUN เขียนเสร็จและขึ้น production แล้วทั้งหมด สิ่งที่เหลือคือการตั้งค่าและงานฝั่ง SPS แบ่งเป็น 3 กลุ่มที่ **ทำแยกกันได้ ไม่ต้องรอกัน**
+
+### กลุ่ม A — ซิงก์รุ่นรถและสี (ไม่ต้องแก้โค้ด SPS เลย)
+
+| # | งาน | ผู้รับผิดชอบ | อ้างอิง |
+|---|---|---|---|
+| A1 | สร้างบัญชี MySQL บน `adam_prod` ที่มีสิทธิ์ `SELECT` เฉพาะ 4 ตาราง | IT / DBA | §5.1 |
+| A2 | เปิดเส้นทางจากเครื่องที่รัน Lead FUN (NAS ภายใน `192.168.0.10`) ไปยัง `<dms-host>:3306` | IT / เครือข่าย | §7.3 |
+| A3 | ใส่ `DMS_MYSQL_URL` ใน `.env` ของ Lead FUN แล้ว restart | Nutt | §7.1 |
+| A4 | กรอกรหัสยี่ห้อของ SPS (`stock_brand.sto_br_id`) ให้ครบทุกยี่ห้อ | Nutt | §5.2 |
+| A5 | กดปุ่ม "ซิงก์ตอนนี้" แล้วตรวจผลรอบแรก | Nutt | §5.3 |
+
+### กลุ่ม B — ตัวตนผู้ใช้และสิทธิ์
+
+| # | งาน | ผู้รับผิดชอบ | อ้างอิง |
+|---|---|---|---|
+| B1 | ส่งรายชื่อผู้ใช้ `u_id`, `u_user`, `u_name`, `line_userid` ของเซลส์/ผจก. ที่จะใช้ Lead FUN | ทีม SPS | §1 |
+| B2 | กรอก `dms_user_id` ให้ผู้ใช้ทุกคน (ทีละคนที่หน้าผู้ใช้ หรือ import) | Nutt | §2.3 |
+| B3 | ตกลงว่าจะซิงก์สิทธิ์สองทางหรือไม่ ถ้าซิงก์ให้ใช้ export/import | ทีม SPS + Nutt | §2.3 |
+
+### กลุ่ม C — SSO 2 ทิศทาง (ต้องเขียนโค้ดฝั่ง SPS)
+
+| # | งาน | ผู้รับผิดชอบ | อ้างอิง |
+|---|---|---|---|
+| C1 | สร้าง `SSO_API_TOKEN` แล้วส่งให้ทีม SPS ทางช่องทางปลอดภัย | Nutt | §7.1 |
+| C2 | เขียน `sso_land.php` — verify ticket, สร้าง session, สร้าง/ค้น `prospectcontact`, redirect ผ่าน `login.php` | ทีม SPS | §3.2, §3.3 |
+| C3 | เพิ่มเมนู "Lead FUN" ใน SPS ที่เรียก `/api/sso/issue` แล้วพาไป `sso_url` | ทีม SPS | §3.4 |
+| C4 | แจ้ง URL ของ `sso_land.php` และ IP ขาออกของเครื่อง SPS | ทีม SPS | §7.2 |
+| C5 | ใส่ `SPS_SSO_LANDING_URL` ใน `.env` แล้ว restart — ปุ่ม "เปิดใบจองใน SPS" จะปรากฏเอง | Nutt | §7.1 |
+| C6 | ทดสอบร่วมตาม checklist | ทั้งสองฝ่าย | §6 |
+
+**ลำดับที่แนะนำ:** A ก่อน เพราะได้ผลทันทีและไม่มีความเสี่ยง · B ทำคู่ขนานได้ · C ทำท้ายสุดเพราะต้องรอโค้ดฝั่ง SPS
 
 ---
 
@@ -307,3 +345,104 @@ GRANT SELECT ON adam_prod.stock_color      TO 'funcatalog_ro'@'<app-host>';
 - [ ] ขาออก: Lead ที่สถานะ "จองแล้ว" กด "เปิดใบจองใน SPS" → `sso_land.php` ได้ payload → เข้าหน้า `booking_form.php` โดยไม่ต้อง login
 - [ ] เรียก `verify` ซ้ำด้วย ticket เดิม → `TICKET_USED` · รอ > 60 วิ → `TICKET_EXPIRED` · token ผิด → 401
 - [ ] ทุกกรณีข้างต้นมีแถวใน `/logs` → Audit ของ Lead FUN
+
+---
+
+## 7. ค่าตั้งค่าทั้งหมด
+
+### 7.1 ฝั่ง Ch.Lead FUN — ไฟล์ `.env` (บนเครื่องที่รัน: `/volume1/docker/fun/.env`)
+
+| ตัวแปร | ตัวอย่าง | ถ้าไม่ตั้งค่า | ใครเป็นคนให้ค่า |
+|---|---|---|---|
+| `DMS_MYSQL_URL` | `mysql://funcatalog_ro:xxx@10.0.0.9:3306/adam_prod` | ปิดการซิงก์รุ่น/สีทั้งหมด ระบบทำงานปกติทุกอย่าง | IT (บัญชี SELECT อย่างเดียว) |
+| `SSO_API_TOKEN` | สตริงสุ่ม ≥ 32 ไบต์ (`openssl rand -base64 32`) | `/api/sso/verify`, `/api/sso/issue` ตอบ 401 เสมอ | Nutt สร้าง แล้วส่งให้ทีม SPS |
+| `SPS_SSO_LANDING_URL` | `https://system.ch-erawan.com/sps/sso_land.php` | ปุ่ม "เปิดใบจองใน SPS" ไม่แสดงให้ใครเห็น | ทีม SPS แจ้ง |
+| `SSO_TICKET_TTL_SEC` | `60` | ใช้ค่า 60 วินาที | ค่าเริ่มต้น ไม่ต้องแก้ |
+| `SPS_URL` | `http://system.ch-erawan.com/sps/` | ใช้ค่าเริ่มต้นนี้อยู่แล้ว | ลิงก์ในเมนู "สลับไประบบอื่น" |
+| `APP_PUBLIC_URL` | `https://fun.ch-erawan.com` | `sso_url` ที่ส่งกลับให้ SPS จะไม่มีชื่อโดเมน | ตั้งไว้แล้วใน `docker-compose.yml` |
+| `AUDIT_RETENTION_DAYS` | `365` | ใช้ 365 วัน (auth/สิทธิ์เก็บ 2 เท่า) | ค่าเริ่มต้น |
+
+วิธีใส่ค่าและทำให้มีผล: แก้ `/volume1/docker/fun/.env` แล้ว
+```bash
+cd /volume1/docker/fun && docker compose up -d
+```
+ไม่ต้อง build ใหม่ ค่าเหล่านี้อ่านตอนรัน · **สวิตช์ปิด**: ลบค่าออกแล้วสั่งคำสั่งเดิม ระบบจะกลับไปทำงานแบบไม่มีการเชื่อมต่อ ไม่มีข้อมูลเสียหาย
+
+### 7.2 ฝั่ง SPS ต้องมี
+
+| รายการ | ค่า | ใช้ที่ไหน |
+|---|---|---|
+| ค่าคงที่ `SSO_API_TOKEN` | ตัวเดียวกับฝั่ง Lead FUN | ส่งเป็น header `X-Api-Token` ทุกครั้งที่เรียก Lead FUN |
+| Base URL ของ Lead FUN | `https://fun.ch-erawan.com` | ปลายทางของ `verify` / `issue` / `permissions` |
+| ไฟล์ `sso_land.php` | ไฟล์ใหม่ ห้ามแก้ไฟล์เดิมของ SPS | รับ ticket ขาออก (§3.2) |
+| เมนู "Lead FUN" | ลิงก์ที่เรียก `/api/sso/issue` ฝั่ง server | ขาเข้า (§3.4) |
+
+### 7.3 เครือข่าย
+
+ทิศทางการเชื่อมต่อมีสองเส้น แยกกันคนละทาง
+
+| เส้น | จาก | ไป | โปรโตคอล | ใช้ทำอะไร |
+|---|---|---|---|---|
+| 1 | เครื่อง SPS | `fun.ch-erawan.com` | HTTPS 443 | เรียก `verify` / `issue` / `permissions` |
+| 2 | เครื่องที่รัน Lead FUN (`192.168.0.10`) | `<dms-host>` | MySQL 3306 | อ่านแคตตาล็อกรุ่น/สี |
+
+ไม่มีเส้นทางไหนที่ Lead FUN เขียนลงฐานข้อมูล SPS และไม่มีเส้นทางไหนที่ SPS ต่อฐานข้อมูลของ Lead FUN โดยตรง
+
+---
+
+## 8. สถานะ ณ วันส่งมอบ (2026-09-10)
+
+### ฝั่ง Lead FUN — เสร็จและใช้งานจริงแล้ว
+
+- สิทธิ์รายเมนู 6 ธง + export/import (`sql/032`)
+- Audit log + หน้าดู/export CSV (`sql/033`)
+- SSO ทั้งสองทิศทาง ฝั่งเราครบ (`sql/034`) — endpoint พร้อมรับ รอเพียงฝั่ง SPS
+- จับคู่สาขา/ยี่ห้อกับ SPS (`sql/035`) — ทุกสาขากรอกรหัส SPS ครบแล้ว
+- ซิงก์รุ่นรถและสี (`sql/036`) — โค้ดพร้อม รอบัญชีฐานข้อมูล
+- migration `032`–`036` รันบน production แล้วทั้งหมด
+
+### ค้างอยู่
+
+| รายการ | ติดที่ | ผลตอนนี้ |
+|---|---|---|
+| `DMS_MYSQL_URL` | รอบัญชี SELECT จาก IT | ยังไม่ซิงก์รุ่น/สี ใช้ข้อมูลที่กรอกเองอยู่ |
+| `SSO_API_TOKEN`, `SPS_SSO_LANDING_URL` | รอ `sso_land.php` ฝั่ง SPS | ปุ่ม "เปิดใบจองใน SPS" ยังไม่แสดง เซลส์คีย์ใบจองใน SPS เองตามปกติ |
+| รหัสยี่ห้อ SPS (`dms_brand_id`) | รอ Nutt กรอก | การซิงก์จะข้ามยี่ห้อที่ยังไม่ผูก |
+| `dms_user_id` ของผู้ใช้ | รอรายชื่อจากทีม SPS | SSO จะใช้ `line_userid` เป็นหลักได้อยู่แล้ว |
+
+### ข้อควรระวังที่พบระหว่างพัฒนา (ส่งต่อให้ทีม SPS รับทราบ)
+
+1. ทุก query ใน SPS ต่อสตริงดิบไม่ escape และไฟล์ autocomplete ไม่ตรวจ session — ค่าใน URL ที่ส่งเข้า SPS ต้อง cast เป็น int ทุกตัว
+2. `booking_form.php` และ `booking_form4.php` อ่านสาขา/ยี่ห้อจากแถว `prospectcontact` ของ `pros_id` แล้วเขียนทับ session ตอนบันทึก — ต้องสร้าง prospect ในสาขาที่ถูกต้องก่อนเสมอ
+3. `login.php` มี `checkIp()` — การเรียกจากนอกออฟฟิศต้องตกลงวิธีปลดล็อกให้ชัด อย่าใช้ `log_backdoor` เป็นทางถาวร
+4. มี LINE channel access token เขียนไว้ตรงๆ ในไฟล์ใต้ web root ของ SPS (`linedep/1.php`) ควรย้ายออกและเปลี่ยน token
+5. ฝั่ง Lead FUN เอง: รหัสผ่านฐานข้อมูลถูก commit อยู่ใน `docker-compose.yml` และ `.env.example` ควรเปลี่ยนรหัสและย้ายไปไฟล์ที่ไม่ commit
+
+---
+
+## 9. คำสั่งทดสอบด่วน (คัดลอกไปวางได้)
+
+แทน `TOKEN` ด้วยค่า `SSO_API_TOKEN` ที่ตกลงกัน
+
+```bash
+# 1) token ถูกต้องหรือไม่ (ควรได้ 400 BAD_REQUEST ไม่ใช่ 401)
+curl -s -X POST https://fun.ch-erawan.com/api/sso/issue \
+  -H "X-Api-Token: TOKEN" -H "Content-Type: application/json" -d '{}'
+
+# 2) ออก ticket ขาเข้าให้ผู้ใช้คนหนึ่ง แล้วเปิด sso_url ในเบราว์เซอร์ที่ยังไม่ล็อกอิน
+curl -s -X POST https://fun.ch-erawan.com/api/sso/issue \
+  -H "X-Api-Token: TOKEN" -H "Content-Type: application/json" \
+  -d '{"dms_user_id": 123, "target": "/leads"}'
+
+# 3) ดึงสิทธิ์ผู้ใช้ทั้งหมดเป็น JSON
+curl -s https://fun.ch-erawan.com/api/permissions/export -H "X-Api-Token: TOKEN"
+
+# 4) ทดสอบ import แบบยังไม่เขียนจริง
+curl -s -X POST https://fun.ch-erawan.com/api/permissions/import \
+  -H "X-Api-Token: TOKEN" -H "Content-Type: application/json" \
+  -d '{"dryRun": true, "rows": [{"u_id": 123, "u_me_menu": "pros2", "u_me_add": "1"}]}'
+
+# 5) ticket ปลอม ต้องได้ TICKET_INVALID
+curl -s -X POST https://fun.ch-erawan.com/api/sso/verify \
+  -H "X-Api-Token: TOKEN" -H "Content-Type: application/json" -d '{"ticket": "not-a-real-ticket"}'
+```
