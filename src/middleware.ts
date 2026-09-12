@@ -4,33 +4,56 @@ import { getToken } from "next-auth/jwt";
 // Gatekeeper (edge-safe: only DECODES the session JWT — Prisma never runs
 // here; roles/approval are baked into the token at sign-in, see src/auth.ts).
 //
-// Disabled entirely while AUTH_LINE_ID/SECRET are unset so the app keeps
-// working before the LINE Login channel exists.
-//
+// Security review 2026-09-12 — this used to switch itself OFF whenever
+// AUTH_LINE_ID/AUTH_LINE_SECRET were empty, which meant one missing env var
+// silently published every lead, customer phone number and settings page to
+// the internet. It now fails CLOSED: protection is always on unless someone
+// deliberately sets AUTH_DISABLED=1 (local development only — never on the
+// NAS). A missing AUTH_SECRET now locks staff out instead of letting the
+// world in, which is the right way round.
+const AUTH_DISABLED = process.env.AUTH_DISABLED === "1";
+
 // Public no matter what: customer QR form, LIFF registration (user req
 // 2026-07-08 — this was missing and bounced customers/LIFF sessions to
 // /login, since it's a separate list from Chrome.tsx's BARE_ROUTES which
 // only controls chrome/no-chrome rendering, not auth), webhooks (own auth),
-// cron jobs (x-api-key), auth endpoints themselves, the public lead API, and
-// the read-only reference data (models/brands) both public forms fetch to
-// populate their pickers.
-const PUBLIC_PREFIXES = [
+// cron jobs (x-api-key), auth endpoints themselves, the public lead API.
+//
+// Matching is by exact path or a real "/" boundary, not bare startsWith, so a
+// future route that merely begins with one of these strings can't inherit
+// public access by accident (security review 2026-09-12).
+const PUBLIC_PATHS = [
   "/login", "/pending", "/lead-form", "/liff",
   "/terms", "/privacy", "/cookies", // legal pages — must be readable pre-login
   "/api/auth", "/api/public", "/api/webhooks", "/api/jobs",
-  "/api/models", "/api/brands",
   // SSO with SPS (sql/034): /sso lands an SPS-issued ticket (no session yet);
   // /api/sso/verify + /api/sso/issue are server-to-server, gated by
   // X-Api-Token inside the route, not by a browser session.
   "/sso", "/api/sso/verify", "/api/sso/issue",
-  "/_next", "/favicon",
 ];
 
+// Reference data the customer-facing forms read to fill their pickers. READS
+// only: the same trees also carry the settings mutations and the SPS
+// catalogue-sync trigger, and those must stay behind the session gate even
+// though requirePerm() checks them again inside the route.
+const PUBLIC_READONLY_PATHS = ["/api/models", "/api/brands"];
+
+// Static assets — genuine prefix matches.
+const PUBLIC_PREFIXES = ["/_next", "/favicon"];
+
+function isPublic(pathname: string, method: string): boolean {
+  if (PUBLIC_PREFIXES.some((p) => pathname.startsWith(p))) return true;
+  const onPath = (p: string) => pathname === p || pathname.startsWith(p + "/");
+  if (PUBLIC_PATHS.some(onPath)) return true;
+  if ((method === "GET" || method === "HEAD") && PUBLIC_READONLY_PATHS.some(onPath)) return true;
+  return false;
+}
+
 export async function middleware(req: NextRequest) {
-  if (!process.env.AUTH_LINE_ID || !process.env.AUTH_LINE_SECRET) return NextResponse.next();
+  if (AUTH_DISABLED) return NextResponse.next();
 
   const { pathname } = req.nextUrl;
-  if (PUBLIC_PREFIXES.some((p) => pathname.startsWith(p))) return NextResponse.next();
+  if (isPublic(pathname, req.method)) return NextResponse.next();
 
   // secureCookie MUST be forced true: the app sits behind Cloudflare Tunnel,
   // which terminates TLS at the edge and forwards plain HTTP internally.

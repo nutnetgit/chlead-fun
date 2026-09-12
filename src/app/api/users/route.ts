@@ -9,6 +9,15 @@ const VALID_ROLES = new Set(["sales", "manager", "gm", "admin"]);
 // User directory with branch access. ?all=1 includes deactivated users
 // (settings page); default = active only (pickers).
 export async function GET(request: NextRequest) {
+  // Every signed-in role may read the directory — the lead forms, pool and
+  // reports all need to name a salesperson. But only manager and up get the
+  // sensitive half (security review 2026-09-12: this handed every sales user
+  // each colleague's phone number, LINE userId, login name and full
+  // permission matrix; the pickers only ever use name/role/branch).
+  const rq = await requireRole(["sales", "manager", "gm", "admin"]);
+  if (!rq.ok) return rq.response;
+  const privileged = rq.role === null || rq.role !== "sales";
+
   const all = request.nextUrl.searchParams.get("all") === "1";
   const users = await prisma.funUser.findMany({
     where: all ? {} : { isActive: 1 },
@@ -16,20 +25,24 @@ export async function GET(request: NextRequest) {
     orderBy: [{ role: "asc" }, { displayName: "asc" }],
   });
   return NextResponse.json(users.map((u) => ({
-    userId: u.userId, displayName: u.displayName, nickname: u.nickname, phone: u.phone,
-    role: u.role, branchId: u.branchId, teamId: u.teamId, lineUserid: u.lineUserid,
-    dmsUserId: u.dmsUserId,
+    userId: u.userId, displayName: u.displayName, nickname: u.nickname,
+    role: u.role, branchId: u.branchId, teamId: u.teamId,
     isActive: !!u.isActive,
     approved: !!u.approvedAt,
     pictureUrl: u.pictureUrl,
     branchIds: u.branchLinks.map((b) => b.branchId),
-    username: u.username,
-    hasPassword: !!u.passwordHash,
-    // Explicit per-user permission rows (null = role defaults) — the settings
-    // editor needs to know whether the user has been customised.
-    perms: u.menuRows.length ? resolvePerms(u.role, u.menuRows) : null,
-    // Still on the pre-032 JSON overrides → the migrate button in /settings/users.
-    legacyMenuAccess: !!u.menuAccess,
+    ...(privileged ? {
+      phone: u.phone,
+      lineUserid: u.lineUserid,
+      dmsUserId: u.dmsUserId,
+      username: u.username,
+      hasPassword: !!u.passwordHash,
+      // Explicit per-user permission rows (null = role defaults) — the settings
+      // editor needs to know whether the user has been customised.
+      perms: u.menuRows.length ? resolvePerms(u.role, u.menuRows) : null,
+      // Still on the pre-032 JSON overrides → the migrate button in /settings/users.
+      legacyMenuAccess: !!u.menuAccess,
+    } : {}),
   })));
 }
 

@@ -100,14 +100,37 @@ export async function deliverWelcomeByPush(leadId: bigint): Promise<boolean> {
 // HMAC guard for the public push-fallback endpoint — the register response
 // hands this to the LIFF page; without it anyone could spam pushes at a
 // leadId. Keyed off AUTH_SECRET (always set in prod).
-export function welcomeSig(leadId: bigint): string {
-  const secret = process.env.AUTH_SECRET || process.env.WEBHOOK_SECRET || "dev";
-  return crypto.createHmac("sha256", secret).update(`welcome:${leadId}`).digest("hex");
+// Signed permission to send ONE paid welcome push for a lead, handed to the
+// LIFF page in the registration response. Security review 2026-09-12: this
+// used to be a bare HMAC of the lead id with no expiry — whoever saw it once
+// could replay it forever to burn LINE message quota — and it fell back to
+// the literal secret "dev" when no env secret was set, which anyone could
+// forge. Now it carries its own deadline and refuses to sign without a real
+// secret.
+const WELCOME_SIG_TTL_MS = 15 * 60_000;
+
+function welcomeSecret(): string {
+  return process.env.AUTH_SECRET || process.env.WEBHOOK_SECRET || "";
+}
+
+export function welcomeSig(leadId: bigint, expiresAt = Date.now() + WELCOME_SIG_TTL_MS): string {
+  const secret = welcomeSecret();
+  if (!secret) return "";
+  const mac = crypto.createHmac("sha256", secret).update(`welcome:${leadId}:${expiresAt}`).digest("hex");
+  return `${expiresAt}.${mac}`;
 }
 
 export function verifyWelcomeSig(leadId: bigint, sig: string): boolean {
   try {
-    const a = Buffer.from(welcomeSig(leadId));
+    if (!welcomeSecret()) return false;
+    const [expRaw, mac] = String(sig).split(".");
+    const expiresAt = Number(expRaw);
+    if (!Number.isFinite(expiresAt) || !mac) return false;
+    if (expiresAt < Date.now()) return false;
+    // Guard against a far-future deadline forged onto a replayed mac; the HMAC
+    // covers the deadline, so this is belt-and-braces only.
+    if (expiresAt > Date.now() + WELCOME_SIG_TTL_MS + 60_000) return false;
+    const a = Buffer.from(welcomeSig(leadId, expiresAt));
     const b = Buffer.from(sig);
     return a.length === b.length && crypto.timingSafeEqual(a, b);
   } catch {

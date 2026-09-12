@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { deliverWelcomeByPush, verifyWelcomeSig } from "@/lib/welcome";
+import { rateLimit, requestIp } from "@/lib/rateLimit";
 
 /**
  * Paid-push fallback for the reply-token welcome flow (user req 2026-07-14,
@@ -23,6 +24,21 @@ export async function POST(request: NextRequest) {
 
   if (!verifyWelcomeSig(leadId, b.sig)) {
     return NextResponse.json({ error: "forbidden" }, { status: 403 });
+  }
+
+  // Each accepted call sends a PAID LINE push, so cap it even for a caller
+  // holding a valid signature (security review 2026-09-12). One lead only ever
+  // needs one greeting; the allowance covers a customer retrying a flaky
+  // network, not a script.
+  const limited = [
+    rateLimit(`welcome:lead:${leadId}`, 3, 60 * 60_000),
+    rateLimit(`welcome:ip:${requestIp(request.headers)}`, 30, 60 * 60_000),
+  ].find((r) => !r.ok);
+  if (limited) {
+    return NextResponse.json(
+      { error: "ส่งข้อความถี่เกินไป" },
+      { status: 429, headers: { "Retry-After": String(limited.retryAfterSec) } },
+    );
   }
 
   const pushed = await deliverWelcomeByPush(leadId);

@@ -4,6 +4,7 @@ import { linePushFlex, buildOwnerConsentBubble } from "@/lib/flex";
 import { getOwnerSwitchConfig } from "@/lib/settings";
 import { getLineCredsForBrand } from "@/lib/lineConfig";
 import { welcomeSig, deliverWelcomeByPush } from "@/lib/welcome";
+import { rateLimit, requestIp } from "@/lib/rateLimit";
 
 /**
  * Customer self-intake from a salesperson's QR (user req 2026-07-07, reworked
@@ -27,7 +28,24 @@ import { welcomeSig, deliverWelcomeByPush } from "@/lib/welcome";
  * intake path.
  * Body: { name, phone, lineId?, lineUserId?, modelId?, ownerUserId, brandId, branchId, eventId? }
  */
+const tooMany = (retryAfterSec: number) =>
+  NextResponse.json(
+    { error: "ส่งข้อมูลถี่เกินไป กรุณารอสักครู่แล้วลองใหม่" },
+    { status: 429, headers: { "Retry-After": String(retryAfterSec) } },
+  );
+
 export async function POST(request: NextRequest) {
+  // Throttling (security review 2026-09-12): this endpoint takes no secret by
+  // design — customers fill it in from their own phones — so without a limit
+  // anyone who has scanned one QR code can replay it forever, filling the
+  // pipeline with junk and burning paid LINE pushes. The per-IP budget is
+  // deliberately loose because a whole showroom or event can share one wifi
+  // address; the per-phone budget below is the one that actually bites, since
+  // a real customer submits once.
+  const ip = requestIp(request.headers);
+  const byIp = rateLimit(`lead:ip:${ip}`, 30, 60 * 60_000);
+  if (!byIp.ok) return tooMany(byIp.retryAfterSec);
+
   const b = (await request.json().catch(() => ({}))) as Record<string, unknown>;
   const name = typeof b.name === "string" ? b.name.trim() : "";
   // Verified LINE profile displayName (user req 2026-07-13) — the `name`
@@ -38,6 +56,10 @@ export async function POST(request: NextRequest) {
   const storedName = lineDisplayName || name;
   const rawPhone = typeof b.phone === "string" ? b.phone : "";
   const phone = rawPhone.replace(/[^0-9+]/g, "").replace(/^\+66/, "0");
+  if (phone) {
+    const byPhone = rateLimit(`lead:phone:${phone}`, 5, 60 * 60_000);
+    if (!byPhone.ok) return tooMany(byPhone.retryAfterSec);
+  }
   // Customer-typed LINE ID (the shareable @id, NOT the internal push userId).
   const lineId = typeof b.lineId === "string" ? b.lineId.trim().replace(/^@/, "").slice(0, 100) : "";
   // Verified LINE userId from liff.getProfile() (see /liff/register) — distinct

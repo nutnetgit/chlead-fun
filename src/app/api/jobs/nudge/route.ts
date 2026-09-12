@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { runNudgeJob } from "@/lib/jobs/nudge";
+import { checkWebhookKey } from "@/lib/apiKey";
 
 export const runtime = "nodejs";
 
@@ -7,10 +8,10 @@ export const runtime = "nodejs";
  * Morning nudge — HTTP entry point for manual/ops triggering. The in-app
  * hourly scheduler (src/instrumentation.ts) calls runNudgeJob() directly
  * in-process; this route stays for manual testing / external callers.
- * Auth: x-api-key == WEBHOOK_SECRET.
+ * Auth: x-api-key == WEBHOOK_SECRET (required; no secret set = nobody in).
  */
 export async function POST(request: NextRequest) {
-  if (process.env.WEBHOOK_SECRET && request.headers.get("x-api-key") !== process.env.WEBHOOK_SECRET) {
+  if (!checkWebhookKey(request.headers.get("x-api-key"))) {
     return NextResponse.json({ ok: false, error: "unauthorized" }, { status: 401 });
   }
   const result = await runNudgeJob();

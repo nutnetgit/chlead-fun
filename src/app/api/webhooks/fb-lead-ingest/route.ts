@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { ingestLead, type LeadInput, type IntakeSource } from "@/lib/leads";
+import { checkWebhookKey } from "@/lib/apiKey";
 
 export const runtime = "nodejs";
 
@@ -18,8 +19,7 @@ const VALID_SOURCES = new Set<IntakeSource>([
 ]);
 
 export async function POST(request: NextRequest) {
-  const key = request.headers.get("x-api-key");
-  if (process.env.WEBHOOK_SECRET && key !== process.env.WEBHOOK_SECRET) {
+  if (!checkWebhookKey(request.headers.get("x-api-key"))) {
     return NextResponse.json({ ok: false, error: "unauthorized" }, { status: 401 });
   }
 

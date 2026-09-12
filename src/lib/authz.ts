@@ -108,6 +108,22 @@ export async function requireLeadAccess(leadId: bigint): Promise<LeadAccess> {
       return { ok: false, response: NextResponse.json({ error: "Forbidden" }, { status: 403 }) };
     }
   }
+  // A manager is scoped to their own branches here too (security review
+  // 2026-09-12: only `sales` was checked, so a manager could open or edit any
+  // lead in any branch by guessing its id — the list endpoints have always
+  // scoped them, this closes the by-id door to match). `viewall` lifts it,
+  // exactly like the lists. A manager with no branch links at all keeps the
+  // long-standing "sees everything" fallback rather than being locked out.
+  if (rq.role === "manager") {
+    const perms = await loadPerms(rq.funUserId!, rq.role);
+    if (!hasPerm(perms, "leads", "viewall")) {
+      const branches = await managerAllowedBranchIds(rq.funUserId!);
+      if (branches.length && !branches.includes(lead.branchId)) {
+        audit({ action: "perm.denied", result: "denied", entityType: "lead", entityId: leadId, detail: `lead of branch ${lead.branchId}, outside manager scope` });
+        return { ok: false, response: NextResponse.json({ error: "Forbidden" }, { status: 403 }) };
+      }
+    }
+  }
   return { ok: true, funUserId: rq.funUserId, role: rq.role, lead };
 }
 

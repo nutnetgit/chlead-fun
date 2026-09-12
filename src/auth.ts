@@ -17,10 +17,15 @@ import { consumeTicket } from "@/lib/sso";
 //    calls POST /api/sso/issue, the browser lands on /sso?ticket=…, and the
 //    ticket is consumed here exactly once. See src/lib/sso.ts.
 // All land on the same fun_user row and the same approval/role gate.
-// Auth is DISABLED entirely (middleware passes everything) until
-// AUTH_LINE_ID/AUTH_LINE_SECRET are set — prevents locking ourselves out
-// before the LINE Login channel exists.
-export const authEnabled = !!process.env.AUTH_LINE_ID && !!process.env.AUTH_LINE_SECRET;
+//
+// Auth is ON unless someone explicitly sets AUTH_DISABLED=1 (local dev).
+// Security review 2026-09-12: this used to derive itself from whether
+// AUTH_LINE_ID/AUTH_LINE_SECRET happened to be set, so an empty env file
+// turned the whole app into an open, admin-rights deployment — requireRole()
+// and requirePerm() hand out admin when this is false. Failing closed means
+// a misconfigured deploy locks staff out (loud, fixable) instead of exposing
+// every customer record (silent, unfixable).
+export const authEnabled = process.env.AUTH_DISABLED !== "1";
 
 export const { handlers, auth, signIn, signOut } = NextAuth({
   providers: [
