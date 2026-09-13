@@ -178,7 +178,7 @@ model FunUser {
 ```json
 {
   "ok": true,
-  "tempPassword": "Erawan9326!"  // returned ONCE, admin shows this to user
+  "tempPassword": "<generated>"  // returned ONCE, admin shows this to user
 }
 ```
 
@@ -284,7 +284,7 @@ model FunUser {
 ### For testing in a new session
 1. Go to https://fun.ch-erawan.com/login
 2. Username/password form should be visible below LINE button (divider in middle)
-3. Use `username='admin'` + temp password `Erawan9326!` (set on your account, user_id 22)
+3. Use `username='admin'` + the temp password issued at the time (removed from this doc 2026-09-13; if it was never changed, reset it)
 4. After login, the ForcePasswordChange overlay should block the app, prompting you to set a new password
 5. Set your permanent password (8+ chars, letter+digit)
 6. App should unlock and show the normal interface

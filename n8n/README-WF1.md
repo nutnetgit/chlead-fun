@@ -23,7 +23,7 @@ Import แล้ว: (1) เลือก MySQL credential `MariaDB n8n_fun` เ�
 ## ขั้นตอนหลัง import (ต้องทำครบทุกข้อ)
 
 1. **MySQL credential** — เปิดโหนด MySQL ทั้ง 4 ตัว (Lookup ×2, Upsert Lead, Log Reopen Activity) แล้วเลือก/สร้าง credential ชื่อ `MariaDB n8n_fun`:
-   host `mariadb-erawan` · port `3306` · database **`ch_lead_fun`** · user `n8n_fun` · password `Er@w@n12345`
+   host `mariadb-erawan` · port `3306` · database **`ch_lead_fun`** · user `n8n_fun` · password: ดูใน `.env` บน NAS (ห้ามเขียนลงเอกสาร)
    (n8n อยู่บน hermes-net เดียวกับ mariadb-erawan แล้ว จึงต่อผ่าน hostname ได้เลย. ถ้าต่อจากนอก Docker ใช้ `192.168.0.10` port **3308**.)
 2. **แทน placeholder ทั้ง 5 จุด** (Phase 1 secrets อยู่ใน n8n ตามที่ตกลง):
    - `__META_VERIFY_TOKEN__` (โหนด "Verify token?") — สตริงสุ่มตั้งเอง ใช้ตอน subscribe webhook กับ Meta

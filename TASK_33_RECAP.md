@@ -123,7 +123,7 @@ ssh -p 2022 nutnet@192.168.0.10 "cd /volume1/docker/fun/srcbuild && sudo -n /usr
     --build-arg NEXT_PUBLIC_BUILD_VERSION=\$(date +%Y%m%d-%H%M) ."
 ssh -p 2022 nutnet@192.168.0.10 "cd /volume1/docker/fun && sudo -n /usr/local/bin/docker compose up -d --force-recreate app"
 ```
-SQL migrations apply via: `scp` the file to `/tmp/` on the NAS, then `docker exec -i mariadb-erawan mysql --default-character-set=utf8mb4 -uroot -p'Er@w@n12345' ch_lead_fun < /tmp/0XX_name.sql`. Both the deploy and any DB write are gated by an auto-mode safety classifier that requires an explicit, freshly-stated instruction naming the action (a bare "yes" sometimes isn't enough if the classifier judges the conversation context ambiguous) — if a command gets denied, just ask the user to restate it more explicitly rather than trying to route around the block.
+SQL migrations apply via: `scp` the file to `/tmp/` on the NAS, then `docker exec -i mariadb-erawan mysql --default-character-set=utf8mb4 -uroot -p ch_lead_fun  (root password: NAS .env only, never in docs) < /tmp/0XX_name.sql`. Both the deploy and any DB write are gated by an auto-mode safety classifier that requires an explicit, freshly-stated instruction naming the action (a bare "yes" sometimes isn't enough if the classifier judges the conversation context ambiguous) — if a command gets denied, just ask the user to restate it more explicitly rather than trying to route around the block.
 
 ---
 
